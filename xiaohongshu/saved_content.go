@@ -218,8 +218,8 @@ func (s *SavedContentAction) safeNavigateToProfile(ctx context.Context) (string,
 
 // navigateToCollectTab 在个人主页基础上导航到收藏 tab
 func (s *SavedContentAction) navigateToCollectTab(page *rod.Page, profileURL string) error {
-	// 在 profile URL 基础上追加 tab=collect
-	collectURL := appendTabToURL(profileURL, "collect")
+	// 在 profile URL 基础上追加 tab=board（小红书收藏 tab 实际参数名为 board）
+	collectURL := appendTabToURL(profileURL, "board")
 	logrus.Infof("导航到收藏 tab: %s", collectURL)
 
 	if err := rod.Try(func() {
@@ -240,6 +240,8 @@ func (s *SavedContentAction) clickCollectTab(page *rod.Page) error {
 	tabSelectors := []string{
 		`div.user-tab span:has-text("收藏")`,
 		`[class*="tab"] [class*="collect"]`,
+		`[class*="tab"] [class*="board"]`,
+		`a[href*="tab=board"]`,
 		`a[href*="tab=collect"]`,
 	}
 
@@ -421,7 +423,7 @@ func buildCollectionURL(profileURL, collectionID string) string {
 	if idx := strings.Index(base, "?"); idx != -1 {
 		base = base[:idx]
 	}
-	return fmt.Sprintf("%s/collect/%s", base, collectionID)
+	return fmt.Sprintf("%s/board/%s", base, collectionID)
 }
 
 // ========== 调试工具 ==========
@@ -460,7 +462,7 @@ const debugSubKeysJS = `() => {
 	const state = window.__INITIAL_STATE__;
 	if (!state) return "";
 	const result = {};
-	const rootNames = ["user", "collect", "collection"];
+	const rootNames = ["user", "collect", "collection", "board"];
 	for (const name of rootNames) {
 		if (state[name]) {
 			result[name] = Object.keys(state[name]);
@@ -473,10 +475,11 @@ const debugSubKeysJS = `() => {
 const readCollectFeedsJS = `() => {
 	const state = window.__INITIAL_STATE__;
 	if (!state) return "";
-	const roots = [state.user, state.collect, state.collection];
+	const roots = [state.board, state.user, state.collect, state.collection];
 	for (const root of roots) {
 		if (!root) continue;
-		const candidates = [root.collect, root.collectNotes, root.collections,
+		const candidates = [root.boardFeedsMap, root.boardListData,
+		                    root.collect, root.collectNotes, root.collections,
 		                    root.notes, root.feeds];
 		for (const c of candidates) {
 			if (!c) continue;
@@ -491,10 +494,11 @@ const readCollectFeedsJS = `() => {
 const readCollectFoldersJS = `() => {
 	const state = window.__INITIAL_STATE__;
 	if (!state) return "";
-	const roots = [state.user, state.collect, state.collection];
+	const roots = [state.board, state.user, state.collect, state.collection];
 	for (const root of roots) {
 		if (!root) continue;
-		const candidates = [root.collectFolders, root.boards,
+		const candidates = [root.boardListData, root.userBoardList,
+		                    root.collectFolders, root.boards,
 		                    root.collectionFolders, root.folders];
 		for (const c of candidates) {
 			if (!c) continue;
