@@ -748,3 +748,99 @@ func (s *AppServer) handleReplyComment(ctx context.Context, args map[string]inte
 		}},
 	}
 }
+
+// handleListCollections 列出收藏夹
+func (s *AppServer) handleListCollections(ctx context.Context) *MCPToolResult {
+	logrus.Info("MCP: 列出收藏夹")
+
+	collections, err := s.xiaohongshuService.ListCollections(ctx)
+	if err != nil {
+		return &MCPToolResult{
+			Content: []MCPContent{{Type: "text", Text: "列出收藏夹失败: " + err.Error()}},
+			IsError: true,
+		}
+	}
+
+	jsonData, err := json.MarshalIndent(collections, "", "  ")
+	if err != nil {
+		return &MCPToolResult{
+			Content: []MCPContent{{Type: "text", Text: fmt.Sprintf("列出收藏夹成功，但序列化失败: %v", err)}},
+			IsError: true,
+		}
+	}
+
+	return &MCPToolResult{
+		Content: []MCPContent{{Type: "text", Text: string(jsonData)}},
+	}
+}
+
+// handleGetCollectionContent 获取收藏夹内容
+func (s *AppServer) handleGetCollectionContent(ctx context.Context, args GetCollectionContentArgs) *MCPToolResult {
+	logrus.Info("MCP: 获取收藏夹内容")
+
+	if args.CollectionID == "" {
+		return &MCPToolResult{
+			Content: []MCPContent{{Type: "text", Text: "获取收藏夹内容失败: 缺少 collection_id 参数"}},
+			IsError: true,
+		}
+	}
+
+	limit := args.Limit
+	if limit > 200 {
+		limit = 200
+	}
+
+	logrus.Infof("MCP: 获取收藏夹内容 - Collection ID: %s, Limit: %d", args.CollectionID, limit)
+
+	result, err := s.xiaohongshuService.GetCollectionContent(ctx, args.CollectionID, limit)
+	if err != nil {
+		return &MCPToolResult{
+			Content: []MCPContent{{Type: "text", Text: "获取收藏夹内容失败: " + err.Error()}},
+			IsError: true,
+		}
+	}
+
+	jsonData, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return &MCPToolResult{
+			Content: []MCPContent{{Type: "text", Text: fmt.Sprintf("获取收藏夹内容成功，但序列化失败: %v", err)}},
+			IsError: true,
+		}
+	}
+
+	return &MCPToolResult{
+		Content: []MCPContent{{Type: "text", Text: string(jsonData)}},
+	}
+}
+
+// handleListSavedContent 列出全部收藏内容
+func (s *AppServer) handleListSavedContent(ctx context.Context, args ListSavedContentArgs) *MCPToolResult {
+	logrus.Info("MCP: 列出全部收藏内容")
+
+	limit := args.Limit
+	if limit > 200 {
+		limit = 200
+	}
+
+	logrus.Infof("MCP: 列出全部收藏内容 - Limit: %d", limit)
+
+	result, err := s.xiaohongshuService.ListSavedContent(ctx, limit)
+	if err != nil {
+		return &MCPToolResult{
+			Content: []MCPContent{{Type: "text", Text: "列出全部收藏内容失败: " + err.Error()}},
+			IsError: true,
+		}
+	}
+
+	jsonData, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return &MCPToolResult{
+			Content: []MCPContent{{Type: "text", Text: fmt.Sprintf("列出全部收藏内容成功，但序列化失败: %v", err)}},
+			IsError: true,
+		}
+	}
+
+	return &MCPToolResult{
+		Content: []MCPContent{{Type: "text", Text: string(jsonData)}},
+	}
+}

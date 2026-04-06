@@ -101,6 +101,20 @@ type FavoriteFeedArgs struct {
 	Unfavorite bool   `json:"unfavorite,omitempty" jsonschema:"是否取消收藏，true为取消收藏，false或未设置则为收藏"`
 }
 
+// ListCollectionsArgs 列出收藏夹的参数（无参数）
+type ListCollectionsArgs struct{}
+
+// GetCollectionContentArgs 获取收藏夹内容的参数
+type GetCollectionContentArgs struct {
+	CollectionID string `json:"collection_id" jsonschema:"收藏夹ID，从 list_collections 获取"`
+	Limit        int    `json:"limit,omitempty" jsonschema:"返回结果数量上限（默认20，最大200）"`
+}
+
+// ListSavedContentArgs 列出全部收藏内容的参数
+type ListSavedContentArgs struct {
+	Limit int `json:"limit,omitempty" jsonschema:"返回结果数量上限（默认20，最大200）"`
+}
+
 // InitMCPServer 初始化 MCP Server
 func InitMCPServer(appServer *AppServer) *mcp.Server {
 	// 创建 MCP Server
@@ -444,7 +458,55 @@ func registerTools(server *mcp.Server, appServer *AppServer) {
 		}),
 	)
 
-	logrus.Infof("Registered %d MCP tools", 13)
+	// 工具 14: 列出收藏夹
+	mcp.AddTool(server,
+		&mcp.Tool{
+			Name:        "list_collections",
+			Description: "列出当前登录用户的所有收藏夹（需要已登录）",
+			Annotations: &mcp.ToolAnnotations{
+				Title:        "List Collections",
+				ReadOnlyHint: true,
+			},
+		},
+		withPanicRecovery("list_collections", func(ctx context.Context, req *mcp.CallToolRequest, _ ListCollectionsArgs) (*mcp.CallToolResult, any, error) {
+			result := appServer.handleListCollections(ctx)
+			return convertToMCPResult(result), nil, nil
+		}),
+	)
+
+	// 工具 15: 获取收藏夹内容
+	mcp.AddTool(server,
+		&mcp.Tool{
+			Name:        "get_collection_content",
+			Description: "获取指定收藏夹中的笔记列表（需要已登录）。collection_id 从 list_collections 获取",
+			Annotations: &mcp.ToolAnnotations{
+				Title:        "Get Collection Content",
+				ReadOnlyHint: true,
+			},
+		},
+		withPanicRecovery("get_collection_content", func(ctx context.Context, req *mcp.CallToolRequest, args GetCollectionContentArgs) (*mcp.CallToolResult, any, error) {
+			result := appServer.handleGetCollectionContent(ctx, args)
+			return convertToMCPResult(result), nil, nil
+		}),
+	)
+
+	// 工具 16: 列出全部收藏内容
+	mcp.AddTool(server,
+		&mcp.Tool{
+			Name:        "list_saved_content",
+			Description: "获取当前登录用户的全部收藏内容（不分收藏夹，需要已登录）",
+			Annotations: &mcp.ToolAnnotations{
+				Title:        "List Saved Content",
+				ReadOnlyHint: true,
+			},
+		},
+		withPanicRecovery("list_saved_content", func(ctx context.Context, req *mcp.CallToolRequest, args ListSavedContentArgs) (*mcp.CallToolResult, any, error) {
+			result := appServer.handleListSavedContent(ctx, args)
+			return convertToMCPResult(result), nil, nil
+		}),
+	)
+
+	logrus.Infof("Registered %d MCP tools", 16)
 }
 
 // convertToMCPResult 将自定义的 MCPToolResult 转换为官方 SDK 的格式
