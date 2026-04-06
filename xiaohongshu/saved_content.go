@@ -67,14 +67,13 @@ func (s *SavedContentAction) ListCollections(ctx context.Context) ([]Collection,
 
 	var collections []Collection
 	if err := json.Unmarshal([]byte(raw), &collections); err != nil {
-		logrus.Warnf("收藏夹数据解析失败，尝试其他格式: %v", err)
-		// 可能是嵌套结构，打印原始数据前100字符帮助调试
+		// 打印原始数据帮助调试格式不匹配
 		if len(raw) > 100 {
-			logrus.Infof("收藏夹原始数据(前100字符): %s", raw[:100])
+			logrus.Warnf("收藏夹数据解析失败: %v, 原始数据(前100字符): %s", err, raw[:100])
 		} else {
-			logrus.Infof("收藏夹原始数据: %s", raw)
+			logrus.Warnf("收藏夹数据解析失败: %v, 原始数据: %s", err, raw)
 		}
-		return []Collection{}, nil
+		return nil, fmt.Errorf("收藏夹数据格式不匹配，请检查服务端日志")
 	}
 
 	logrus.Infof("获取到 %d 个收藏夹", len(collections))
@@ -271,7 +270,7 @@ func (s *SavedContentAction) readCollectFeeds(page *rod.Page) ([]Feed, error) {
 		rootKeys := s.debugRootKeys(page)
 		s.debugSubKeys(page)
 		logrus.Warnf("未找到收藏内容数据，root keys: %v", rootKeys)
-		return []Feed{}, nil
+		return nil, fmt.Errorf("无法读取收藏数据，state key 未匹配，请检查服务端日志")
 	}
 
 	return flattenFeeds([]byte(raw))

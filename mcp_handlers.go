@@ -786,7 +786,9 @@ func (s *AppServer) handleGetCollectionContent(ctx context.Context, args GetColl
 	}
 
 	limit := args.Limit
-	if limit > 200 {
+	if limit <= 0 {
+		limit = 20
+	} else if limit > 200 {
 		limit = 200
 	}
 
@@ -818,7 +820,9 @@ func (s *AppServer) handleListSavedContent(ctx context.Context, args ListSavedCo
 	logrus.Info("MCP: 列出全部收藏内容")
 
 	limit := args.Limit
-	if limit > 200 {
+	if limit <= 0 {
+		limit = 20
+	} else if limit > 200 {
 		limit = 200
 	}
 
