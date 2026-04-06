@@ -26,19 +26,19 @@ func scrollAndCollectFeeds(page *rod.Page, initialFeeds []Feed, limit int) []Fee
 		return allFeeds[:limit]
 	}
 
-	const maxStale = 3
+	const maxStale = 5
 	staleCount := 0
 
 	for staleCount < maxStale && len(allFeeds) < limit {
-		// 使用 go-rod 滚动触发懒加载
-		if err := page.Mouse.Scroll(0, 800, 3); err != nil {
+		// 使用 JS 滚动触发懒加载（比 Mouse.Scroll 更可靠）
+		if _, err := page.Eval(`() => window.scrollBy(0, 1500)`); err != nil {
 			logrus.Warnf("翻页滚动失败: %v", err)
 			break
 		}
-		time.Sleep(1 * time.Second)
+		time.Sleep(2 * time.Second)
 
 		// 等待页面稳定
-		_ = page.WaitStable(500 * time.Millisecond)
+		_ = page.WaitStable(1 * time.Second)
 
 		// 重读 __INITIAL_STATE__ 中的 feeds
 		obj, err := page.Eval(readFeedsJS)
