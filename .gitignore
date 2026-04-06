@@ -43,3 +43,6 @@ test_*.sh
 # Cookies files (contain sensitive login information)
 cookies.json
 doc/
+
+# Playwright MCP debug artifacts
+.playwright-mcp/
