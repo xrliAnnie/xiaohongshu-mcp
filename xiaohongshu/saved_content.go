@@ -75,8 +75,7 @@ func (s *SavedContentAction) ListCollections(ctx context.Context) ([]Collection,
 
 	raw := page.MustEval(readCollectionsJS).String()
 	if raw == "" {
-		logrus.Warn("未找到收藏夹数据，返回空列表")
-		return []Collection{}, nil
+		return nil, fmt.Errorf("无法读取收藏夹数据，state key 未匹配")
 	}
 
 	var collections []Collection
@@ -106,6 +105,11 @@ func (s *SavedContentAction) GetCollectionContent(ctx context.Context, collectio
 		page.MustWaitStable()
 	}); err != nil {
 		return nil, fmt.Errorf("导航到专辑页面失败: %w", err)
+	}
+
+	// 登录态检测（专辑页不经过 safeNavigateToProfile，需单独检查）
+	if err := checkLoginState(page); err != nil {
+		return nil, err
 	}
 
 	if err := checkPageAccessible(page); err != nil {
@@ -201,6 +205,11 @@ func (s *SavedContentAction) safeNavigateToProfile(ctx context.Context) (string,
 		return "", fmt.Errorf("等待个人主页加载失败: %w", err)
 	}
 
+	// 等待 URL 切换到个人主页（/user/profile/），避免在 SPA 路由切换完成前读取 URL
+	if err := s.waitForProfileURL(page); err != nil {
+		return "", err
+	}
+
 	if err := checkLoginState(page); err != nil {
 		return "", err
 	}
@@ -212,6 +221,22 @@ func (s *SavedContentAction) safeNavigateToProfile(ctx context.Context) (string,
 
 	logrus.Infof("已导航到个人主页: %s", info.URL)
 	return info.URL, nil
+}
+
+// waitForProfileURL 轮询等待 URL 切换到个人主页
+func (s *SavedContentAction) waitForProfileURL(page *rod.Page) error {
+	const maxAttempts = 10
+	for i := 0; i < maxAttempts; i++ {
+		info, err := page.Info()
+		if err != nil {
+			return fmt.Errorf("获取页面信息失败: %w", err)
+		}
+		if strings.Contains(info.URL, "/user/profile/") {
+			return nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return fmt.Errorf("等待个人主页 URL 超时，可能未成功导航")
 }
 
 // ========== 数据读取 ==========
@@ -282,6 +307,7 @@ func (s *SavedContentAction) scrollAndCollectFeeds(page *rod.Page, initial []Fee
 	staleCount := 0
 
 	for staleCount < maxStale && len(all) < limit {
+		// 使用 JS 滚动触发懒加载（比 Mouse.Scroll 更可靠，与 search_pagination 保持一致）
 		if _, err := page.Eval(`() => window.scrollBy(0, 1500)`); err != nil {
 			break
 		}
@@ -349,6 +375,7 @@ func (s *SavedContentAction) scrollAndCollectBoardNotes(page *rod.Page, boardID 
 	expr := readBoardNotesExpr(boardID)
 
 	for staleCount < maxStale && len(all) < limit {
+		// 使用 JS 滚动触发懒加载（比 Mouse.Scroll 更可靠，与 search_pagination 保持一致）
 		if _, err := page.Eval(`() => window.scrollBy(0, 1500)`); err != nil {
 			break
 		}
@@ -439,11 +466,12 @@ func appendTabToURL(profileURL, tab string) string {
 // ========== JS 表达式 ==========
 
 // readCollectionsJS 读取收藏夹列表: board.userBoardList._value
+// 返回 "" 表示 key 未命中，"[]" 表示空数组（正常无收藏夹）
 const readCollectionsJS = `() => {
 	const state = window.__INITIAL_STATE__;
 	if (!state || !state.board || !state.board.userBoardList) return "";
 	const data = state.board.userBoardList._value || state.board.userBoardList.value;
-	if (!Array.isArray(data) || data.length === 0) return "";
+	if (!Array.isArray(data)) return "";
 	return JSON.stringify(data);
 }`
 
