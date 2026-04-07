@@ -223,10 +223,14 @@ func (s *SavedContentAction) safeNavigateToProfile(ctx context.Context) (string,
 	return info.URL, nil
 }
 
-// waitForProfileURL 轮询等待 URL 切换到个人主页
+// waitForProfileURL 轮询等待 URL 切换到个人主页，同时检测登录弹窗
 func (s *SavedContentAction) waitForProfileURL(page *rod.Page) error {
 	const maxAttempts = 10
 	for i := 0; i < maxAttempts; i++ {
+		// 优先检测登录弹窗（点击后可能触发登录而非跳转）
+		if err := checkLoginState(page); err != nil {
+			return err
+		}
 		info, err := page.Info()
 		if err != nil {
 			return fmt.Errorf("获取页面信息失败: %w", err)
