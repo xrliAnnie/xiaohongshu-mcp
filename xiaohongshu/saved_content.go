@@ -235,48 +235,33 @@ func (s *SavedContentAction) safeNavigateToProfile(ctx context.Context) (string,
 
 // clickBoardSubTab 点击"专辑" subTab 触发收藏夹数据加载
 func (s *SavedContentAction) clickBoardSubTab(page *rod.Page) error {
-	tabSelectors := []string{
-		`div.board-tab span`,           // subTab 区域内的 span
-		`[class*="tab"] span`,          // 通用 tab span
-		`[class*="sub-tab"] span`,      // subTab 容器
-		`[class*="channel-list"] span`, // channel 列表
+	el, err := page.Timeout(5*time.Second).ElementR("span", "专辑")
+	if err != nil {
+		return fmt.Errorf("未找到专辑 subTab 元素: %w", err)
 	}
 
-	for _, sel := range tabSelectors {
-		els, err := page.Timeout(3 * time.Second).Elements(sel)
-		if err != nil {
-			continue
-		}
-		for _, el := range els {
-			text, err := el.Text()
-			if err != nil {
-				continue
-			}
-			if strings.TrimSpace(text) == "专辑" {
-				if err := el.Click(proto.InputMouseButtonLeft, 1); err != nil {
-					continue
-				}
-				_ = page.WaitStable(2 * time.Second)
-				logrus.Info("已点击专辑 subTab")
-				return nil
-			}
-		}
+	if err := el.Click(proto.InputMouseButtonLeft, 1); err != nil {
+		return fmt.Errorf("点击专辑 subTab 失败: %w", err)
 	}
 
-	return fmt.Errorf("未找到专辑 subTab 元素")
+	_ = page.WaitStable(2 * time.Second)
+	logrus.Info("已点击专辑 subTab")
+	return nil
 }
 
-// waitForBoardList 等待 board.userBoardList 数据加载完成
+// waitForBoardList 等待专辑数据加载（boardPageStatus 变为非 pending）
 func (s *SavedContentAction) waitForBoardList(page *rod.Page) error {
 	const maxAttempts = 15
 	for i := 0; i < maxAttempts; i++ {
-		raw := page.MustEval(readCollectionsJS).String()
-		if raw != "" {
+		// 检查 boardPageStatus 是否已变为 resolved（数据加载完成）
+		status := page.MustEval(readBoardPageStatusJS).String()
+		if status != "" && status != "pending" {
 			return nil
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	// 超时后仍无数据，可能是真的没有收藏夹
+	// 超时后仍为 pending，但不阻塞 — 后续读取会处理空数据
+	logrus.Warn("等待专辑数据加载超时，boardPageStatus 仍为 pending")
 	return nil
 }
 
@@ -525,6 +510,13 @@ func appendTabToURL(profileURL, tab string) string {
 }
 
 // ========== JS 表达式 ==========
+
+// readBoardPageStatusJS 读取 board.boardPageStatus（pending/resolved）
+const readBoardPageStatusJS = `() => {
+	const state = window.__INITIAL_STATE__;
+	if (!state || !state.board || !state.board.boardPageStatus) return "";
+	return state.board.boardPageStatus;
+}`
 
 // readCollectionsJS 读取收藏夹列表: board.userBoardList._value
 // 返回 "" 表示 key 未命中，"[]" 表示空数组（正常无收藏夹）
