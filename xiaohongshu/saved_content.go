@@ -471,6 +471,7 @@ const debugSubKeysJS = `() => {
 }`
 
 // readCollectFeedsJS 读取收藏笔记（多 root + 多 sub key 探测）
+// 只返回 array 数据，忽略空 object {}
 const readCollectFeedsJS = `() => {
 	const state = window.__INITIAL_STATE__;
 	if (!state) return "";
@@ -483,13 +484,16 @@ const readCollectFeedsJS = `() => {
 		for (const c of candidates) {
 			if (!c) continue;
 			const data = c.value !== undefined ? c.value : c._value;
-			if (data) return JSON.stringify(data);
+			if (!data) continue;
+			if (Array.isArray(data) && data.length > 0) return JSON.stringify(data);
+			if (typeof data === "object" && !Array.isArray(data) && Object.keys(data).length > 0) return JSON.stringify(data);
 		}
 	}
 	return "";
 }`
 
 // readCollectFoldersJS 读取收藏夹列表（多 root + 多 sub key 探测）
+// 只返回 array 数据，忽略空 object {}
 const readCollectFoldersJS = `() => {
 	const state = window.__INITIAL_STATE__;
 	if (!state) return "";
@@ -502,7 +506,9 @@ const readCollectFoldersJS = `() => {
 		for (const c of candidates) {
 			if (!c) continue;
 			const data = c.value !== undefined ? c.value : c._value;
-			if (data) return JSON.stringify(data);
+			if (!data) continue;
+			if (Array.isArray(data) && data.length > 0) return JSON.stringify(data);
+			if (typeof data === "object" && !Array.isArray(data) && Object.keys(data).length > 0) return JSON.stringify(data);
 		}
 	}
 	return "";
