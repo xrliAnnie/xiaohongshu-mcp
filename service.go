@@ -86,6 +86,12 @@ type FeedsListResponse struct {
 	Count int                `json:"count"`
 }
 
+// BoardNotesResponse 专辑笔记响应
+type BoardNotesResponse struct {
+	Notes []xiaohongshu.BoardNote `json:"notes"`
+	Count int                     `json:"count"`
+}
+
 // UserProfileResponse 用户主页响应
 type UserProfileResponse struct {
 	UserBasicInfo xiaohongshu.UserBasicInfo      `json:"userBasicInfo"`
@@ -597,4 +603,56 @@ func (s *XiaohongshuService) GetMyProfile(ctx context.Context) (*UserProfileResp
 	}
 
 	return response, nil
+}
+
+// ListCollections 列出当前登录用户的收藏夹
+func (s *XiaohongshuService) ListCollections(ctx context.Context, limit int) ([]xiaohongshu.Collection, error) {
+	b := newBrowser()
+	defer b.Close()
+
+	page := b.NewPage()
+	defer page.Close()
+
+	action := xiaohongshu.NewSavedContentAction(page)
+	return action.ListCollections(ctx, limit)
+}
+
+// GetCollectionContent 获取指定专辑的内容
+func (s *XiaohongshuService) GetCollectionContent(ctx context.Context, collectionID string, limit int) (*BoardNotesResponse, error) {
+	b := newBrowser()
+	defer b.Close()
+
+	page := b.NewPage()
+	defer page.Close()
+
+	action := xiaohongshu.NewSavedContentAction(page)
+	notes, err := action.GetCollectionContent(ctx, collectionID, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	return &BoardNotesResponse{
+		Notes: notes,
+		Count: len(notes),
+	}, nil
+}
+
+// ListSavedContent 获取全部收藏内容
+func (s *XiaohongshuService) ListSavedContent(ctx context.Context, limit int) (*FeedsListResponse, error) {
+	b := newBrowser()
+	defer b.Close()
+
+	page := b.NewPage()
+	defer page.Close()
+
+	action := xiaohongshu.NewSavedContentAction(page)
+	feeds, err := action.ListSavedContent(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	return &FeedsListResponse{
+		Feeds: feeds,
+		Count: len(feeds),
+	}, nil
 }
