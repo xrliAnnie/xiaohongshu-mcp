@@ -86,6 +86,12 @@ type FeedsListResponse struct {
 	Count int                `json:"count"`
 }
 
+// BoardNotesResponse 专辑笔记响应
+type BoardNotesResponse struct {
+	Notes []xiaohongshu.BoardNote `json:"notes"`
+	Count int                     `json:"count"`
+}
+
 // UserProfileResponse 用户主页响应
 type UserProfileResponse struct {
 	UserBasicInfo xiaohongshu.UserBasicInfo      `json:"userBasicInfo"`
@@ -611,8 +617,8 @@ func (s *XiaohongshuService) ListCollections(ctx context.Context) ([]xiaohongshu
 	return action.ListCollections(ctx)
 }
 
-// GetCollectionContent 获取指定收藏夹的内容
-func (s *XiaohongshuService) GetCollectionContent(ctx context.Context, collectionID string, limit int) (*FeedsListResponse, error) {
+// GetCollectionContent 获取指定专辑的内容
+func (s *XiaohongshuService) GetCollectionContent(ctx context.Context, collectionID string, limit int) (*BoardNotesResponse, error) {
 	b := newBrowser()
 	defer b.Close()
 
@@ -620,14 +626,14 @@ func (s *XiaohongshuService) GetCollectionContent(ctx context.Context, collectio
 	defer page.Close()
 
 	action := xiaohongshu.NewSavedContentAction(page)
-	feeds, err := action.GetCollectionContent(ctx, collectionID, limit)
+	notes, err := action.GetCollectionContent(ctx, collectionID, limit)
 	if err != nil {
 		return nil, err
 	}
 
-	return &FeedsListResponse{
-		Feeds: feeds,
-		Count: len(feeds),
+	return &BoardNotesResponse{
+		Notes: notes,
+		Count: len(notes),
 	}, nil
 }
 

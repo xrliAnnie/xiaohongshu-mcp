@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -16,12 +17,28 @@ import (
 // ErrNotLoggedIn 未登录错误（sentinel，用 errors.Is 判定）
 var ErrNotLoggedIn = errors.New("请先登录小红书，使用 check_login_status 检查登录状态")
 
+// validBoardID 校验专辑 ID 格式（防止 JS 注入）
+var validBoardID = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
 // Collection 收藏夹信息
 type Collection struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Count int    `json:"count"`
-	Cover string `json:"cover,omitempty"`
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Total   int      `json:"total"`
+	Desc    string   `json:"desc"`
+	Images  []string `json:"images,omitempty"`
+	Privacy int      `json:"privacy"`
+	Fans    int      `json:"fans"`
+}
+
+// BoardNote 专辑内的笔记（结构与 Feed 不同）
+type BoardNote struct {
+	NoteID         string `json:"noteId"`
+	DisplayTitle   string `json:"displayTitle"`
+	XsecToken      string `json:"xsecToken"`
+	Type           string `json:"type"`
+	LastUpdateTime string `json:"lastUpdateTime"`
+	Cover          Cover  `json:"cover"`
 }
 
 // SavedContentAction 收藏内容浏览
@@ -30,7 +47,7 @@ type SavedContentAction struct {
 }
 
 func NewSavedContentAction(page *rod.Page) *SavedContentAction {
-	pp := page.Timeout(90 * time.Second)
+	pp := page.Timeout(180 * time.Second)
 	return &SavedContentAction{page: pp}
 }
 
@@ -38,121 +55,109 @@ func NewSavedContentAction(page *rod.Page) *SavedContentAction {
 func (s *SavedContentAction) ListCollections(ctx context.Context) ([]Collection, error) {
 	page := s.page.Context(ctx)
 
-	// 安全导航到个人主页
 	profileURL, err := s.safeNavigateToProfile(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	// 导航到收藏 tab
-	if err := s.navigateToCollectTab(page, profileURL); err != nil {
-		return nil, fmt.Errorf("导航到收藏页失败: %w", err)
+	// 导航到 ?tab=fav&subTab=board
+	collectURL := appendTabToURL(profileURL, "fav") + "&subTab=board"
+	logrus.Infof("导航到收藏夹列表: %s", collectURL)
+
+	if err := rod.Try(func() {
+		page.MustNavigate(collectURL)
+		page.MustWaitStable()
+	}); err != nil {
+		return nil, fmt.Errorf("导航到收藏夹列表失败: %w", err)
 	}
 
-	// 等待 state 加载
 	page.MustWait(`() => window.__INITIAL_STATE__ !== undefined`)
 
-	// 两层探测：先打印 root keys
-	rootKeys := s.debugRootKeys(page)
-	logrus.Infof("收藏页 __INITIAL_STATE__ root keys: %v", rootKeys)
-
-	// 读取收藏夹列表
-	raw := page.MustEval(readCollectFoldersJS).String()
+	raw := page.MustEval(readCollectionsJS).String()
 	if raw == "" {
-		// 尝试探测更多 key 信息
-		s.debugSubKeys(page)
 		logrus.Warn("未找到收藏夹数据，返回空列表")
 		return []Collection{}, nil
 	}
 
 	var collections []Collection
 	if err := json.Unmarshal([]byte(raw), &collections); err != nil {
-		// 打印原始数据帮助调试格式不匹配
-		if len(raw) > 100 {
-			logrus.Warnf("收藏夹数据解析失败: %v, 原始数据(前100字符): %s", err, raw[:100])
-		} else {
-			logrus.Warnf("收藏夹数据解析失败: %v, 原始数据: %s", err, raw)
-		}
-		return nil, fmt.Errorf("收藏夹数据格式不匹配，请检查服务端日志")
+		logrus.Warnf("收藏夹数据解析失败: %v", err)
+		return nil, fmt.Errorf("收藏夹数据格式不匹配: %w", err)
 	}
 
 	logrus.Infof("获取到 %d 个收藏夹", len(collections))
 	return collections, nil
 }
 
-// GetCollectionContent 获取指定收藏夹中的笔记
-func (s *SavedContentAction) GetCollectionContent(ctx context.Context, collectionID string, limit int) ([]Feed, error) {
+// GetCollectionContent 获取指定专辑中的笔记
+func (s *SavedContentAction) GetCollectionContent(ctx context.Context, collectionID string, limit int) ([]BoardNote, error) {
+	if !validBoardID.MatchString(collectionID) {
+		return nil, fmt.Errorf("无效的专辑 ID: %s", collectionID)
+	}
+
 	page := s.page.Context(ctx)
 
-	// 安全导航到个人主页
-	profileURL, err := s.safeNavigateToProfile(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// 构造收藏夹详情页 URL
-	collectionURL := buildCollectionURL(profileURL, collectionID)
-	logrus.Infof("导航到收藏夹: %s", collectionURL)
+	// 专辑页使用独立 URL，无需经过个人主页
+	boardURL := fmt.Sprintf("https://www.xiaohongshu.com/board/%s", collectionID)
+	logrus.Infof("导航到专辑: %s", boardURL)
 
 	if err := rod.Try(func() {
-		page.MustNavigate(collectionURL)
+		page.MustNavigate(boardURL)
 		page.MustWaitStable()
 	}); err != nil {
-		return nil, fmt.Errorf("导航到收藏夹页面失败: %w", err)
+		return nil, fmt.Errorf("导航到专辑页面失败: %w", err)
 	}
 
-	// 检查页面是否可访问
 	if err := checkPageAccessible(page); err != nil {
-		return nil, fmt.Errorf("收藏夹不存在或无法访问: %w", err)
+		return nil, fmt.Errorf("专辑不存在或无法访问: %w", err)
 	}
 
-	// 等待 state 加载
 	page.MustWait(`() => window.__INITIAL_STATE__ !== undefined`)
 
-	// 读取收藏内容
-	feeds, err := s.readCollectFeeds(page)
+	notes, err := s.readBoardNotes(page, collectionID)
 	if err != nil {
 		return nil, err
 	}
 
-	// 翻页加载更多
-	if limit > 0 && len(feeds) < limit {
-		feeds = s.scrollAndCollect(page, feeds, limit)
-	} else if limit > 0 && len(feeds) > limit {
-		feeds = feeds[:limit]
+	if limit > 0 && len(notes) < limit {
+		notes = s.scrollAndCollectBoardNotes(page, collectionID, notes, limit)
+	} else if limit > 0 && len(notes) > limit {
+		notes = notes[:limit]
 	}
 
-	logrus.Infof("收藏夹 %s 获取到 %d 条笔记", collectionID, len(feeds))
-	return feeds, nil
+	logrus.Infof("专辑 %s 获取到 %d 条笔记", collectionID, len(notes))
+	return notes, nil
 }
 
 // ListSavedContent 获取全部收藏内容
 func (s *SavedContentAction) ListSavedContent(ctx context.Context, limit int) ([]Feed, error) {
 	page := s.page.Context(ctx)
 
-	// 安全导航到个人主页
 	profileURL, err := s.safeNavigateToProfile(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	// 导航到收藏 tab
-	if err := s.navigateToCollectTab(page, profileURL); err != nil {
+	// 导航到 ?tab=fav（收藏笔记列表）
+	favURL := appendTabToURL(profileURL, "fav")
+	logrus.Infof("导航到收藏内容: %s", favURL)
+
+	if err := rod.Try(func() {
+		page.MustNavigate(favURL)
+		page.MustWaitStable()
+	}); err != nil {
 		return nil, fmt.Errorf("导航到收藏页失败: %w", err)
 	}
 
-	// 等待 state 加载
 	page.MustWait(`() => window.__INITIAL_STATE__ !== undefined`)
 
-	// 读取收藏内容
-	feeds, err := s.readCollectFeeds(page)
+	feeds, err := s.readSavedFeeds(page)
 	if err != nil {
 		return nil, err
 	}
 
-	// 翻页加载更多
 	if limit > 0 && len(feeds) < limit {
-		feeds = s.scrollAndCollect(page, feeds, limit)
+		feeds = s.scrollAndCollectFeeds(page, feeds, limit)
 	} else if limit > 0 && len(feeds) > limit {
 		feeds = feeds[:limit]
 	}
@@ -161,13 +166,12 @@ func (s *SavedContentAction) ListSavedContent(ctx context.Context, limit int) ([
 	return feeds, nil
 }
 
-// ========== 导航相关 ==========
+// ========== 导航 ==========
 
-// safeNavigateToProfile 安全导航到个人主页（非 Must API，显式处理未登录）
+// safeNavigateToProfile 安全导航到个人主页（显式处理未登录）
 func (s *SavedContentAction) safeNavigateToProfile(ctx context.Context) (string, error) {
 	page := s.page.Context(ctx)
 
-	// 导航到 explore 页面
 	if err := rod.Try(func() {
 		page.MustNavigate("https://www.xiaohongshu.com/explore")
 		page.MustWaitStable()
@@ -175,21 +179,18 @@ func (s *SavedContentAction) safeNavigateToProfile(ctx context.Context) (string,
 		return "", fmt.Errorf("导航到首页失败: %w", err)
 	}
 
-	// 多信号登录检测
 	if err := checkLoginState(page); err != nil {
 		return "", err
 	}
 
-	// 查找侧边栏 "我" 入口（带超时）
+	// 查找侧边栏 "我" 入口
 	el, err := page.Timeout(5 * time.Second).Element(
 		`div.main-container li.user.side-bar-component a.link-wrapper span.channel`,
 	)
 	if err != nil {
-		// 侧边栏用户入口不存在 = 未登录
 		return "", ErrNotLoggedIn
 	}
 
-	// 点击并等待导航
 	if err := el.Click(proto.InputMouseButtonLeft, 1); err != nil {
 		return "", fmt.Errorf("点击用户入口失败: %w", err)
 	}
@@ -200,12 +201,10 @@ func (s *SavedContentAction) safeNavigateToProfile(ctx context.Context) (string,
 		return "", fmt.Errorf("等待个人主页加载失败: %w", err)
 	}
 
-	// 二次登录检测
 	if err := checkLoginState(page); err != nil {
 		return "", err
 	}
 
-	// 返回当前 URL
 	info, err := page.Info()
 	if err != nil {
 		return "", fmt.Errorf("获取页面信息失败: %w", err)
@@ -215,83 +214,46 @@ func (s *SavedContentAction) safeNavigateToProfile(ctx context.Context) (string,
 	return info.URL, nil
 }
 
-// navigateToCollectTab 在个人主页基础上导航到收藏 tab
-func (s *SavedContentAction) navigateToCollectTab(page *rod.Page, profileURL string) error {
-	// 在 profile URL 基础上追加 tab=board（小红书收藏 tab 实际参数名为 board）
-	collectURL := appendTabToURL(profileURL, "board")
-	logrus.Infof("导航到收藏 tab: %s", collectURL)
-
-	if err := rod.Try(func() {
-		page.MustNavigate(collectURL)
-		page.MustWaitStable()
-	}); err != nil {
-		// URL 导航失败，尝试点击收藏 tab
-		logrus.Warnf("URL 导航到收藏 tab 失败，尝试 DOM 点击: %v", err)
-		return s.clickCollectTab(page)
-	}
-
-	return nil
-}
-
-// clickCollectTab 通过 DOM 点击收藏 tab（fallback）
-func (s *SavedContentAction) clickCollectTab(page *rod.Page) error {
-	// 尝试点击收藏 tab 元素
-	tabSelectors := []string{
-		`div.user-tab span:has-text("收藏")`,
-		`[class*="tab"] [class*="collect"]`,
-		`[class*="tab"] [class*="board"]`,
-		`a[href*="tab=board"]`,
-		`a[href*="tab=collect"]`,
-	}
-
-	for _, sel := range tabSelectors {
-		el, err := page.Timeout(3 * time.Second).Element(sel)
-		if err != nil {
-			continue
-		}
-		if err := el.Click(proto.InputMouseButtonLeft, 1); err != nil {
-			continue
-		}
-		page.WaitStable(2 * time.Second)
-		logrus.Infof("通过 DOM 点击收藏 tab 成功: %s", sel)
-		return nil
-	}
-
-	return fmt.Errorf("无法找到收藏 tab 元素")
-}
-
 // ========== 数据读取 ==========
 
-// readCollectFeeds 从 __INITIAL_STATE__ 读取收藏笔记
-func (s *SavedContentAction) readCollectFeeds(page *rod.Page) ([]Feed, error) {
-	raw := page.MustEval(readCollectFeedsJS).String()
+// readSavedFeeds 从 user.notes._value 读取收藏笔记
+func (s *SavedContentAction) readSavedFeeds(page *rod.Page) ([]Feed, error) {
+	raw := page.MustEval(readSavedFeedsJS).String()
 	if raw == "" {
-		// 探测并打印调试信息
-		rootKeys := s.debugRootKeys(page)
-		s.debugSubKeys(page)
-		logrus.Warnf("未找到收藏内容数据，root keys: %v", rootKeys)
-		return nil, fmt.Errorf("无法读取收藏数据，state key 未匹配，请检查服务端日志")
+		logrus.Warn("未找到收藏内容数据")
+		return nil, fmt.Errorf("无法读取收藏数据，state key 未匹配")
 	}
-
 	return flattenFeeds([]byte(raw))
 }
 
-// flattenFeeds 归一化 Feed 数据，统一处理 []Feed 和 [][]Feed
+// readBoardNotes 从 board.boardFeedsMap._value[boardId].notes 读取专辑笔记
+func (s *SavedContentAction) readBoardNotes(page *rod.Page, boardID string) ([]BoardNote, error) {
+	expr := readBoardNotesExpr(boardID)
+	raw := page.MustEval(expr).String()
+	if raw == "" {
+		logrus.Warn("未找到专辑内容数据")
+		return nil, fmt.Errorf("无法读取专辑数据")
+	}
+
+	var notes []BoardNote
+	if err := json.Unmarshal([]byte(raw), &notes); err != nil {
+		return nil, fmt.Errorf("专辑数据格式不匹配: %w", err)
+	}
+	return notes, nil
+}
+
+// flattenFeeds 归一化 Feed 数据（处理 []Feed 和 [][]Feed）
 func flattenFeeds(raw []byte) ([]Feed, error) {
-	// 先尝试 []Feed
 	var feeds []Feed
 	if err := json.Unmarshal(raw, &feeds); err == nil {
 		return feeds, nil
 	}
 
-	// 再尝试 [][]Feed（双重数组，与 user.notes 格式一致）
 	var nestedFeeds [][]Feed
 	if err := json.Unmarshal(raw, &nestedFeeds); err == nil {
 		var result []Feed
 		for _, group := range nestedFeeds {
-			if len(group) > 0 {
-				result = append(result, group...)
-			}
+			result = append(result, group...)
 		}
 		return result, nil
 	}
@@ -301,38 +263,33 @@ func flattenFeeds(raw []byte) ([]Feed, error) {
 
 // ========== 翻页 ==========
 
-// scrollAndCollect 滚动加载更多收藏内容
-func (s *SavedContentAction) scrollAndCollect(page *rod.Page, initialFeeds []Feed, limit int) []Feed {
-	seen := make(map[string]bool, len(initialFeeds))
-	var allFeeds []Feed
-	for _, f := range initialFeeds {
+// scrollAndCollectFeeds 滚动加载更多收藏笔记
+func (s *SavedContentAction) scrollAndCollectFeeds(page *rod.Page, initial []Feed, limit int) []Feed {
+	seen := make(map[string]bool, len(initial))
+	var all []Feed
+	for _, f := range initial {
 		if !seen[f.ID] {
 			seen[f.ID] = true
-			allFeeds = append(allFeeds, f)
+			all = append(all, f)
 		}
 	}
 
-	if len(allFeeds) >= limit {
-		return allFeeds[:limit]
+	if len(all) >= limit {
+		return all[:limit]
 	}
 
 	const maxStale = 5
 	staleCount := 0
 
-	for staleCount < maxStale && len(allFeeds) < limit {
-		// 滚动触发懒加载
+	for staleCount < maxStale && len(all) < limit {
 		if _, err := page.Eval(`() => window.scrollBy(0, 1500)`); err != nil {
-			logrus.Warnf("收藏翻页滚动失败: %v", err)
 			break
 		}
 		time.Sleep(2 * time.Second)
-
 		_ = page.WaitStable(1 * time.Second)
 
-		// 重读收藏数据
-		obj, err := page.Eval(readCollectFeedsJS)
+		obj, err := page.Eval(readSavedFeedsJS)
 		if err != nil {
-			logrus.Warnf("收藏翻页读取失败: %v", err)
 			break
 		}
 
@@ -344,7 +301,6 @@ func (s *SavedContentAction) scrollAndCollect(page *rod.Page, initialFeeds []Fee
 
 		feeds, err := flattenFeeds([]byte(raw))
 		if err != nil {
-			logrus.Warnf("收藏翻页解析失败: %v", err)
 			staleCount++
 			continue
 		}
@@ -353,7 +309,7 @@ func (s *SavedContentAction) scrollAndCollect(page *rod.Page, initialFeeds []Fee
 		for _, f := range feeds {
 			if !seen[f.ID] {
 				seen[f.ID] = true
-				allFeeds = append(allFeeds, f)
+				all = append(all, f)
 				newCount++
 			}
 		}
@@ -364,20 +320,86 @@ func (s *SavedContentAction) scrollAndCollect(page *rod.Page, initialFeeds []Fee
 			staleCount = 0
 		}
 
-		logrus.Infof("收藏翻页: 本次新增 %d 条, 总计 %d/%d", newCount, len(allFeeds), limit)
+		logrus.Infof("收藏翻页: 新增 %d 条, 总计 %d/%d", newCount, len(all), limit)
 	}
 
-	if len(allFeeds) > limit {
-		return allFeeds[:limit]
+	if len(all) > limit {
+		return all[:limit]
 	}
-	return allFeeds
+	return all
+}
+
+// scrollAndCollectBoardNotes 滚动加载更多专辑笔记
+func (s *SavedContentAction) scrollAndCollectBoardNotes(page *rod.Page, boardID string, initial []BoardNote, limit int) []BoardNote {
+	seen := make(map[string]bool, len(initial))
+	var all []BoardNote
+	for _, n := range initial {
+		if !seen[n.NoteID] {
+			seen[n.NoteID] = true
+			all = append(all, n)
+		}
+	}
+
+	if len(all) >= limit {
+		return all[:limit]
+	}
+
+	const maxStale = 5
+	staleCount := 0
+	expr := readBoardNotesExpr(boardID)
+
+	for staleCount < maxStale && len(all) < limit {
+		if _, err := page.Eval(`() => window.scrollBy(0, 1500)`); err != nil {
+			break
+		}
+		time.Sleep(2 * time.Second)
+		_ = page.WaitStable(1 * time.Second)
+
+		obj, err := page.Eval(expr)
+		if err != nil {
+			break
+		}
+
+		raw := obj.Value.String()
+		if raw == "" {
+			staleCount++
+			continue
+		}
+
+		var notes []BoardNote
+		if err := json.Unmarshal([]byte(raw), &notes); err != nil {
+			staleCount++
+			continue
+		}
+
+		newCount := 0
+		for _, n := range notes {
+			if !seen[n.NoteID] {
+				seen[n.NoteID] = true
+				all = append(all, n)
+				newCount++
+			}
+		}
+
+		if newCount == 0 {
+			staleCount++
+		} else {
+			staleCount = 0
+		}
+
+		logrus.Infof("专辑翻页: 新增 %d 条, 总计 %d/%d", newCount, len(all), limit)
+	}
+
+	if len(all) > limit {
+		return all[:limit]
+	}
+	return all
 }
 
 // ========== 登录检测 ==========
 
 // checkLoginState 多信号登录检测
 func checkLoginState(page *rod.Page) error {
-	// 信号 1: URL 包含登录路径
 	if info, err := page.Info(); err == nil {
 		url := info.URL
 		if strings.Contains(url, "/login") || strings.Contains(url, "signin") {
@@ -385,7 +407,6 @@ func checkLoginState(page *rod.Page) error {
 		}
 	}
 
-	// 信号 2: 页面内出现登录弹窗
 	loginSelectors := []string{
 		".login-container",
 		".qr-login-container",
@@ -415,101 +436,36 @@ func appendTabToURL(profileURL, tab string) string {
 	return profileURL + "?tab=" + tab
 }
 
-// buildCollectionURL 构造收藏夹详情页 URL
-func buildCollectionURL(profileURL, collectionID string) string {
-	// 从 profile URL 中提取基础路径（去掉 query 参数）
-	base := profileURL
-	if idx := strings.Index(base, "?"); idx != -1 {
-		base = base[:idx]
-	}
-	return fmt.Sprintf("%s/board/%s", base, collectionID)
+// ========== JS 表达式 ==========
+
+// readCollectionsJS 读取收藏夹列表: board.userBoardList._value
+const readCollectionsJS = `() => {
+	const state = window.__INITIAL_STATE__;
+	if (!state || !state.board || !state.board.userBoardList) return "";
+	const data = state.board.userBoardList._value || state.board.userBoardList.value;
+	if (!Array.isArray(data) || data.length === 0) return "";
+	return JSON.stringify(data);
+}`
+
+// readSavedFeedsJS 读取收藏笔记: user.notes._value
+const readSavedFeedsJS = `() => {
+	const state = window.__INITIAL_STATE__;
+	if (!state || !state.user || !state.user.notes) return "";
+	const data = state.user.notes._value || state.user.notes.value;
+	if (!data) return "";
+	return JSON.stringify(data);
+}`
+
+// readBoardNotesExpr 读取专辑笔记: board.boardFeedsMap._value[boardId].notes
+// boardID 已通过 validBoardID 校验，安全拼接
+func readBoardNotesExpr(boardID string) string {
+	return fmt.Sprintf(`() => {
+		const state = window.__INITIAL_STATE__;
+		if (!state || !state.board || !state.board.boardFeedsMap) return "";
+		const feedsMap = state.board.boardFeedsMap._value || state.board.boardFeedsMap.value;
+		if (!feedsMap) return "";
+		const entry = feedsMap["%s"];
+		if (!entry || !entry.notes) return "";
+		return JSON.stringify(entry.notes);
+	}`, boardID)
 }
-
-// ========== 调试工具 ==========
-
-// debugRootKeys 打印 __INITIAL_STATE__ 的 root keys
-func (s *SavedContentAction) debugRootKeys(page *rod.Page) []string {
-	raw := page.MustEval(debugRootKeysJS).String()
-	if raw == "" {
-		return nil
-	}
-	var keys []string
-	if err := json.Unmarshal([]byte(raw), &keys); err != nil {
-		return nil
-	}
-	return keys
-}
-
-// debugSubKeys 打印候选 root 下的 sub keys
-func (s *SavedContentAction) debugSubKeys(page *rod.Page) {
-	raw := page.MustEval(debugSubKeysJS).String()
-	if raw != "" {
-		logrus.Infof("候选 root 的 sub keys: %s", raw)
-	}
-}
-
-// ========== JS 读取表达式 ==========
-
-// debugRootKeysJS 探测 __INITIAL_STATE__ 的 root keys
-const debugRootKeysJS = `() => {
-	const state = window.__INITIAL_STATE__;
-	return state ? JSON.stringify(Object.keys(state)) : "";
-}`
-
-// debugSubKeysJS 打印候选 root 下的 sub keys
-const debugSubKeysJS = `() => {
-	const state = window.__INITIAL_STATE__;
-	if (!state) return "";
-	const result = {};
-	const rootNames = ["user", "collect", "collection", "board"];
-	for (const name of rootNames) {
-		if (state[name]) {
-			result[name] = Object.keys(state[name]);
-		}
-	}
-	return JSON.stringify(result);
-}`
-
-// readCollectFeedsJS 读取收藏笔记（多 root + 多 sub key 探测）
-// 只返回 array 数据，忽略空 object {}
-const readCollectFeedsJS = `() => {
-	const state = window.__INITIAL_STATE__;
-	if (!state) return "";
-	const roots = [state.board, state.user, state.collect, state.collection];
-	for (const root of roots) {
-		if (!root) continue;
-		const candidates = [root.boardFeedsMap, root.boardListData,
-		                    root.collect, root.collectNotes, root.collections,
-		                    root.notes, root.feeds];
-		for (const c of candidates) {
-			if (!c) continue;
-			const data = c.value !== undefined ? c.value : c._value;
-			if (!data) continue;
-			if (Array.isArray(data) && data.length > 0) return JSON.stringify(data);
-			if (typeof data === "object" && !Array.isArray(data) && Object.keys(data).length > 0) return JSON.stringify(data);
-		}
-	}
-	return "";
-}`
-
-// readCollectFoldersJS 读取收藏夹列表（多 root + 多 sub key 探测）
-// 只返回 array 数据，忽略空 object {}
-const readCollectFoldersJS = `() => {
-	const state = window.__INITIAL_STATE__;
-	if (!state) return "";
-	const roots = [state.board, state.user, state.collect, state.collection];
-	for (const root of roots) {
-		if (!root) continue;
-		const candidates = [root.boardListData, root.userBoardList,
-		                    root.collectFolders, root.boards,
-		                    root.collectionFolders, root.folders];
-		for (const c of candidates) {
-			if (!c) continue;
-			const data = c.value !== undefined ? c.value : c._value;
-			if (!data) continue;
-			if (Array.isArray(data) && data.length > 0) return JSON.stringify(data);
-			if (typeof data === "object" && !Array.isArray(data) && Object.keys(data).length > 0) return JSON.stringify(data);
-		}
-	}
-	return "";
-}`
