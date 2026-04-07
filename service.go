@@ -606,7 +606,7 @@ func (s *XiaohongshuService) GetMyProfile(ctx context.Context) (*UserProfileResp
 }
 
 // ListCollections 列出当前登录用户的收藏夹
-func (s *XiaohongshuService) ListCollections(ctx context.Context) ([]xiaohongshu.Collection, error) {
+func (s *XiaohongshuService) ListCollections(ctx context.Context, limit int) ([]xiaohongshu.Collection, error) {
 	b := newBrowser()
 	defer b.Close()
 
@@ -614,7 +614,7 @@ func (s *XiaohongshuService) ListCollections(ctx context.Context) ([]xiaohongshu
 	defer page.Close()
 
 	action := xiaohongshu.NewSavedContentAction(page)
-	return action.ListCollections(ctx)
+	return action.ListCollections(ctx, limit)
 }
 
 // GetCollectionContent 获取指定专辑的内容

@@ -101,8 +101,10 @@ type FavoriteFeedArgs struct {
 	Unfavorite bool   `json:"unfavorite,omitempty" jsonschema:"是否取消收藏，true为取消收藏，false或未设置则为收藏"`
 }
 
-// ListCollectionsArgs 列出收藏夹的参数（无参数）
-type ListCollectionsArgs struct{}
+// ListCollectionsArgs 列出收藏夹的参数
+type ListCollectionsArgs struct {
+	Limit int `json:"limit,omitempty" jsonschema:"返回结果数量上限（默认20，最大500）。设置后会滚动加载更多"`
+}
 
 // GetCollectionContentArgs 获取收藏夹内容的参数
 type GetCollectionContentArgs struct {
@@ -468,8 +470,8 @@ func registerTools(server *mcp.Server, appServer *AppServer) {
 				ReadOnlyHint: true,
 			},
 		},
-		withPanicRecovery("list_collections", func(ctx context.Context, req *mcp.CallToolRequest, _ ListCollectionsArgs) (*mcp.CallToolResult, any, error) {
-			result := appServer.handleListCollections(ctx)
+		withPanicRecovery("list_collections", func(ctx context.Context, req *mcp.CallToolRequest, args ListCollectionsArgs) (*mcp.CallToolResult, any, error) {
+			result := appServer.handleListCollections(ctx, args)
 			return convertToMCPResult(result), nil, nil
 		}),
 	)

@@ -52,7 +52,7 @@ func NewSavedContentAction(page *rod.Page) *SavedContentAction {
 }
 
 // ListCollections 列出当前登录用户的所有收藏夹
-func (s *SavedContentAction) ListCollections(ctx context.Context) ([]Collection, error) {
+func (s *SavedContentAction) ListCollections(ctx context.Context, limit int) ([]Collection, error) {
 	page := s.page.Context(ctx)
 
 	profileURL, err := s.safeNavigateToProfile(ctx)
@@ -83,15 +83,16 @@ func (s *SavedContentAction) ListCollections(ctx context.Context) ([]Collection,
 		return nil, err
 	}
 
-	raw := page.MustEval(readCollectionsJS).String()
-	if raw == "" {
-		return nil, fmt.Errorf("无法读取收藏夹数据，state key 未匹配")
+	collections, err := s.readCollections(page)
+	if err != nil {
+		return nil, err
 	}
 
-	var collections []Collection
-	if err := json.Unmarshal([]byte(raw), &collections); err != nil {
-		logrus.Warnf("收藏夹数据解析失败: %v", err)
-		return nil, fmt.Errorf("收藏夹数据格式不匹配: %w", err)
+	// 翻页加载更多
+	if limit > 0 && len(collections) < limit {
+		collections = s.scrollAndCollectCollections(page, collections, limit)
+	} else if limit > 0 && len(collections) > limit {
+		collections = collections[:limit]
 	}
 
 	logrus.Infof("获取到 %d 个收藏夹", len(collections))
@@ -287,6 +288,20 @@ func (s *SavedContentAction) waitForProfileURL(page *rod.Page) error {
 
 // ========== 数据读取 ==========
 
+// readCollections 从 board.userBoardList._value 读取收藏夹
+func (s *SavedContentAction) readCollections(page *rod.Page) ([]Collection, error) {
+	raw := page.MustEval(readCollectionsJS).String()
+	if raw == "" {
+		return nil, fmt.Errorf("无法读取收藏夹数据，state key 未匹配")
+	}
+
+	var collections []Collection
+	if err := json.Unmarshal([]byte(raw), &collections); err != nil {
+		return nil, fmt.Errorf("收藏夹数据格式不匹配: %w", err)
+	}
+	return collections, nil
+}
+
 // readSavedFeeds 从 user.notes._value 读取收藏笔记
 func (s *SavedContentAction) readSavedFeeds(page *rod.Page) ([]Feed, error) {
 	raw := page.MustEval(readSavedFeedsJS).String()
@@ -333,6 +348,68 @@ func flattenFeeds(raw []byte) ([]Feed, error) {
 }
 
 // ========== 翻页 ==========
+
+// scrollAndCollectCollections 滚动加载更多收藏夹
+func (s *SavedContentAction) scrollAndCollectCollections(page *rod.Page, initial []Collection, limit int) []Collection {
+	seen := make(map[string]bool, len(initial))
+	var all []Collection
+	for _, c := range initial {
+		if !seen[c.ID] {
+			seen[c.ID] = true
+			all = append(all, c)
+		}
+	}
+
+	if len(all) >= limit {
+		return all[:limit]
+	}
+
+	const maxStale = 5
+	staleCount := 0
+
+	for staleCount < maxStale && len(all) < limit {
+		// 使用 JS 滚动触发懒加载（比 Mouse.Scroll 更可靠，与 search_pagination 保持一致）
+		if _, err := page.Eval(`() => window.scrollBy(0, 1500)`); err != nil {
+			break
+		}
+		time.Sleep(2 * time.Second)
+		_ = page.WaitStable(1 * time.Second)
+
+		raw := page.MustEval(readCollectionsJS).String()
+		if raw == "" {
+			staleCount++
+			continue
+		}
+
+		var collections []Collection
+		if err := json.Unmarshal([]byte(raw), &collections); err != nil {
+			staleCount++
+			continue
+		}
+
+		newCount := 0
+		for _, c := range collections {
+			if !seen[c.ID] {
+				seen[c.ID] = true
+				all = append(all, c)
+				newCount++
+			}
+		}
+
+		if newCount == 0 {
+			staleCount++
+		} else {
+			staleCount = 0
+		}
+
+		logrus.Infof("收藏夹翻页: 新增 %d 个, 总计 %d/%d", newCount, len(all), limit)
+	}
+
+	if len(all) > limit {
+		return all[:limit]
+	}
+	return all
+}
 
 // scrollAndCollectFeeds 滚动加载更多收藏笔记
 func (s *SavedContentAction) scrollAndCollectFeeds(page *rod.Page, initial []Feed, limit int) []Feed {

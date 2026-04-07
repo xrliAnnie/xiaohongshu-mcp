@@ -750,10 +750,19 @@ func (s *AppServer) handleReplyComment(ctx context.Context, args map[string]inte
 }
 
 // handleListCollections 列出收藏夹
-func (s *AppServer) handleListCollections(ctx context.Context) *MCPToolResult {
+func (s *AppServer) handleListCollections(ctx context.Context, args ListCollectionsArgs) *MCPToolResult {
 	logrus.Info("MCP: 列出收藏夹")
 
-	collections, err := s.xiaohongshuService.ListCollections(ctx)
+	limit := args.Limit
+	if limit <= 0 {
+		limit = 20
+	} else if limit > 500 {
+		limit = 500
+	}
+
+	logrus.Infof("MCP: 列出收藏夹 - Limit: %d", limit)
+
+	collections, err := s.xiaohongshuService.ListCollections(ctx, limit)
 	if err != nil {
 		return &MCPToolResult{
 			Content: []MCPContent{{Type: "text", Text: "列出收藏夹失败: " + err.Error()}},
