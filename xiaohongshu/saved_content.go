@@ -60,18 +60,28 @@ func (s *SavedContentAction) ListCollections(ctx context.Context) ([]Collection,
 		return nil, err
 	}
 
-	// 导航到 ?tab=fav&subTab=board
-	collectURL := appendTabToURL(profileURL, "fav") + "&subTab=board"
-	logrus.Infof("导航到收藏夹列表: %s", collectURL)
+	// 先导航到 ?tab=fav（收藏 tab），URL 直接带 subTab=board 不会触发数据加载
+	favURL := appendTabToURL(profileURL, "fav")
+	logrus.Infof("导航到收藏 tab: %s", favURL)
 
 	if err := rod.Try(func() {
-		page.MustNavigate(collectURL)
+		page.MustNavigate(favURL)
 		page.MustWaitStable()
 	}); err != nil {
-		return nil, fmt.Errorf("导航到收藏夹列表失败: %w", err)
+		return nil, fmt.Errorf("导航到收藏 tab 失败: %w", err)
 	}
 
 	page.MustWait(`() => window.__INITIAL_STATE__ !== undefined`)
+
+	// DOM 点击"专辑" subTab 触发数据加载
+	if err := s.clickBoardSubTab(page); err != nil {
+		return nil, fmt.Errorf("点击专辑 subTab 失败: %w", err)
+	}
+
+	// 等待 board.userBoardList 数据加载
+	if err := s.waitForBoardList(page); err != nil {
+		return nil, err
+	}
 
 	raw := page.MustEval(readCollectionsJS).String()
 	if raw == "" {
@@ -221,6 +231,53 @@ func (s *SavedContentAction) safeNavigateToProfile(ctx context.Context) (string,
 
 	logrus.Infof("已导航到个人主页: %s", info.URL)
 	return info.URL, nil
+}
+
+// clickBoardSubTab 点击"专辑" subTab 触发收藏夹数据加载
+func (s *SavedContentAction) clickBoardSubTab(page *rod.Page) error {
+	tabSelectors := []string{
+		`div.board-tab span`,           // subTab 区域内的 span
+		`[class*="tab"] span`,          // 通用 tab span
+		`[class*="sub-tab"] span`,      // subTab 容器
+		`[class*="channel-list"] span`, // channel 列表
+	}
+
+	for _, sel := range tabSelectors {
+		els, err := page.Timeout(3 * time.Second).Elements(sel)
+		if err != nil {
+			continue
+		}
+		for _, el := range els {
+			text, err := el.Text()
+			if err != nil {
+				continue
+			}
+			if strings.TrimSpace(text) == "专辑" {
+				if err := el.Click(proto.InputMouseButtonLeft, 1); err != nil {
+					continue
+				}
+				_ = page.WaitStable(2 * time.Second)
+				logrus.Info("已点击专辑 subTab")
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf("未找到专辑 subTab 元素")
+}
+
+// waitForBoardList 等待 board.userBoardList 数据加载完成
+func (s *SavedContentAction) waitForBoardList(page *rod.Page) error {
+	const maxAttempts = 15
+	for i := 0; i < maxAttempts; i++ {
+		raw := page.MustEval(readCollectionsJS).String()
+		if raw != "" {
+			return nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	// 超时后仍无数据，可能是真的没有收藏夹
+	return nil
 }
 
 // waitForProfileURL 轮询等待 URL 切换到个人主页，同时检测登录弹窗
