@@ -37,7 +37,7 @@ type BoardNote struct {
 	DisplayTitle   string `json:"displayTitle"`
 	XsecToken      string `json:"xsecToken"`
 	Type           string `json:"type"`
-	LastUpdateTime string `json:"lastUpdateTime"`
+	LastUpdateTime int64  `json:"lastUpdateTime"`
 	Cover          Cover  `json:"cover"`
 }
 
