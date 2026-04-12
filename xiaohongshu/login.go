@@ -22,16 +22,17 @@ func (a *LoginAction) CheckLoginStatus(ctx context.Context) (bool, error) {
 
 	time.Sleep(1 * time.Second)
 
-	exists, _, err := pp.Has(`.main-container .user .link-wrapper .channel`)
-	if err != nil {
-		return false, errors.Wrap(err, "check login status failed")
+	// 优先检查新版页面结构（avatar-container）
+	if exists, _, _ := pp.Has(`.main-container .avatar-container .author-avatar`); exists {
+		return true, nil
 	}
 
-	if !exists {
-		return false, errors.Wrap(err, "login status element not found")
+	// 兼容旧版页面结构
+	if exists, _, _ := pp.Has(`.main-container .user .link-wrapper .channel`); exists {
+		return true, nil
 	}
 
-	return true, nil
+	return false, nil
 }
 
 func (a *LoginAction) Login(ctx context.Context) error {
@@ -43,15 +44,16 @@ func (a *LoginAction) Login(ctx context.Context) error {
 	// 等待一小段时间让页面完全加载
 	time.Sleep(2 * time.Second)
 
-	// 检查是否已经登录
+	// 检查是否已经登录（兼容新旧页面结构）
+	if exists, _, _ := pp.Has(".main-container .avatar-container .author-avatar"); exists {
+		return nil
+	}
 	if exists, _, _ := pp.Has(".main-container .user .link-wrapper .channel"); exists {
-		// 已经登录，直接返回
 		return nil
 	}
 
-	// 等待扫码成功提示或者登录完成
-	// 这里我们等待登录成功的元素出现，这样更简单可靠
-	pp.MustElement(".main-container .user .link-wrapper .channel")
+	// 等待扫码成功：新版用 avatar，旧版用 channel
+	pp.MustElement(".main-container .avatar-container .author-avatar, .main-container .user .link-wrapper .channel")
 
 	return nil
 }
@@ -65,7 +67,10 @@ func (a *LoginAction) FetchQrcodeImage(ctx context.Context) (string, bool, error
 	// 等待一小段时间让页面完全加载
 	time.Sleep(2 * time.Second)
 
-	// 检查是否已经登录
+	// 检查是否已经登录（兼容新旧页面结构）
+	if exists, _, _ := pp.Has(".main-container .avatar-container .author-avatar"); exists {
+		return "", true, nil
+	}
 	if exists, _, _ := pp.Has(".main-container .user .link-wrapper .channel"); exists {
 		return "", true, nil
 	}
@@ -92,7 +97,7 @@ func (a *LoginAction) WaitForLogin(ctx context.Context) bool {
 		case <-ctx.Done():
 			return false
 		case <-ticker.C:
-			el, err := pp.Element(".main-container .user .link-wrapper .channel")
+			el, err := pp.Element(".main-container .avatar-container .author-avatar, .main-container .user .link-wrapper .channel")
 			if err == nil && el != nil {
 				return true
 			}
