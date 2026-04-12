@@ -23,12 +23,20 @@ func (a *LoginAction) CheckLoginStatus(ctx context.Context) (bool, error) {
 	time.Sleep(1 * time.Second)
 
 	// 优先检查新版页面结构（avatar-container）
-	if exists, _, _ := pp.Has(`.main-container .avatar-container .author-avatar`); exists {
+	exists, _, err := pp.Has(`.main-container .avatar-container .author-avatar`)
+	if err != nil {
+		return false, errors.Wrap(err, "check new login selector failed")
+	}
+	if exists {
 		return true, nil
 	}
 
 	// 兼容旧版页面结构
-	if exists, _, _ := pp.Has(`.main-container .user .link-wrapper .channel`); exists {
+	exists, _, err = pp.Has(`.main-container .user .link-wrapper .channel`)
+	if err != nil {
+		return false, errors.Wrap(err, "check old login selector failed")
+	}
+	if exists {
 		return true, nil
 	}
 
