@@ -1,6 +1,7 @@
 package configs
 
 import (
+	"net/url"
 	"os"
 	"strings"
 )
@@ -31,9 +32,13 @@ func BaseURL() string {
 	return baseURL
 }
 
-// IsRednote 判断当前是否为 Rednote 模式
+// IsRednote 判断当前是否为 Rednote 模式（基于 host 而非字符串匹配）
 func IsRednote() bool {
-	return strings.Contains(BaseURL(), "rednote.com")
+	u, err := url.Parse(BaseURL())
+	if err != nil {
+		return false
+	}
+	return strings.HasSuffix(u.Hostname(), "rednote.com")
 }
 
 // CreatorURL 返回创作者平台 URL
