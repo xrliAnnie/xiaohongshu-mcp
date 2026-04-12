@@ -1,6 +1,9 @@
 package configs
 
-import "os"
+import (
+	"os"
+	"strings"
+)
 
 var (
 	useHeadless = true
@@ -11,16 +14,16 @@ var (
 	baseURL = ""
 )
 
-// InitBaseURL 初始化 base URL，优先环境变量
+// InitBaseURL 初始化 base URL，优先环境变量，规范化去尾斜杠
 func InitBaseURL() {
 	if v := os.Getenv("XHS_BASE_URL"); v != "" {
-		baseURL = v
+		baseURL = strings.TrimRight(v, "/")
 	} else {
 		baseURL = "https://www.xiaohongshu.com"
 	}
 }
 
-// BaseURL 返回当前 base URL（如 https://www.xiaohongshu.com 或 https://www.rednote.com）
+// BaseURL 返回当前 base URL（无尾斜杠）
 func BaseURL() string {
 	if baseURL == "" {
 		InitBaseURL()
@@ -28,12 +31,14 @@ func BaseURL() string {
 	return baseURL
 }
 
+// IsRednote 判断当前是否为 Rednote 模式
+func IsRednote() bool {
+	return strings.Contains(BaseURL(), "rednote.com")
+}
+
 // CreatorURL 返回创作者平台 URL
 func CreatorURL() string {
-	if baseURL == "" {
-		InitBaseURL()
-	}
-	if baseURL == "https://www.rednote.com" {
+	if IsRednote() {
 		return "https://creator.rednote.com"
 	}
 	return "https://creator.xiaohongshu.com"
