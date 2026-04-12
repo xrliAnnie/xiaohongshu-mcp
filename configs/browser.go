@@ -38,7 +38,8 @@ func IsRednote() bool {
 	if err != nil {
 		return false
 	}
-	return strings.HasSuffix(u.Hostname(), "rednote.com")
+	host := u.Hostname()
+	return host == "rednote.com" || strings.HasSuffix(host, ".rednote.com")
 }
 
 // CreatorURL 返回创作者平台 URL
