@@ -12,6 +12,7 @@ import (
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
 	"github.com/sirupsen/logrus"
+	"github.com/xpzouying/xiaohongshu-mcp/configs"
 )
 
 // ErrNotLoggedIn 未登录错误（sentinel，用 errors.Is 判定）
@@ -108,7 +109,7 @@ func (s *SavedContentAction) GetCollectionContent(ctx context.Context, collectio
 	page := s.page.Context(ctx)
 
 	// 专辑页使用独立 URL，无需经过个人主页
-	boardURL := fmt.Sprintf("https://www.xiaohongshu.com/board/%s", collectionID)
+	boardURL := fmt.Sprintf(configs.BaseURL()+"/board/%s", collectionID)
 	logrus.Infof("导航到专辑: %s", boardURL)
 
 	if err := rod.Try(func() {
@@ -188,7 +189,7 @@ func (s *SavedContentAction) safeNavigateToProfile(ctx context.Context) (string,
 	page := s.page.Context(ctx)
 
 	if err := rod.Try(func() {
-		page.MustNavigate("https://www.xiaohongshu.com/explore")
+		page.MustNavigate(configs.BaseURL() + "/explore")
 		page.MustWaitStable()
 	}); err != nil {
 		return "", fmt.Errorf("导航到首页失败: %w", err)
