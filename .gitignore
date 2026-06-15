@@ -42,7 +42,12 @@ test_*.sh
 
 # Cookies files (contain sensitive login information)
 cookies.json
+<<<<<<< HEAD
 doc/
 
 # Playwright MCP debug artifacts
 .playwright-mcp/
+=======
+docker/data/
+docker/images/
+>>>>>>> upstream/main
