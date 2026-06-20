@@ -87,9 +87,14 @@ type FeedsListResponse struct {
 }
 
 // BoardNotesResponse 专辑笔记响应
+//
+// Count = 实际枚举到的可服务笔记数；Total = 收藏夹 saved 计数（含已删除/不可见，
+// 来自 board.boardDetails，0 表示未读到）。Count < Total 表示有笔记已被作者删除/
+// 设为私密，平台 feed 不再返回 —— 任何方式都拿不到，属正常。
 type BoardNotesResponse struct {
 	Notes []xiaohongshu.BoardNote `json:"notes"`
 	Count int                     `json:"count"`
+	Total int                     `json:"total"`
 }
 
 // UserProfileResponse 用户主页响应
@@ -626,7 +631,7 @@ func (s *XiaohongshuService) GetCollectionContent(ctx context.Context, collectio
 	defer page.Close()
 
 	action := xiaohongshu.NewSavedContentAction(page)
-	notes, err := action.GetCollectionContent(ctx, collectionID, limit)
+	notes, total, err := action.GetCollectionContent(ctx, collectionID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -634,6 +639,7 @@ func (s *XiaohongshuService) GetCollectionContent(ctx context.Context, collectio
 	return &BoardNotesResponse{
 		Notes: notes,
 		Count: len(notes),
+		Total: total,
 	}, nil
 }
 
