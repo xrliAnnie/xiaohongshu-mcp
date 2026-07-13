@@ -427,8 +427,8 @@ docker build -t xpzouying/xiaohongshu-mcp .
 
 Docker 版本会自动：
 
-- 配置 Chrome 浏览器和中文字体
-- 挂载 `./data` 用于存储 cookies
+- 配置 CloakBrowser Chromium 和中文字体
+- 挂载 `./data` 用于存储 cookies 和运行数据目录
 - 挂载 `./images` 用于存储发布的图片
 - 暴露 18060 端口供 MCP 连接
 
@@ -997,9 +997,9 @@ npx mcporter list xiaohongshu-mcp
 **重要：在群里问问题之前，请一定要先仔细看完 README 文档以及查看 Issues。**
 
 ### 微信群
-|                                                 微信群 23 群                                        |                                                 微信群 24 群                                         |
+|                                                 微信群 24 群                                        |                                                 微信群 25 群                                         |
 | :------------------------------------------------------------------------------------------------: | :------------------------------------------------------------------------------------------------: |
-| <img src="https://github.com/user-attachments/assets/d12a2bcc-ecd9-4bc8-8c36-fe5b16112e44" alt="WechatIMG119" width="300"> | <img src="https://github.com/user-attachments/assets/4aa00b70-da08-4867-92f1-99d1394e4338" alt="WechatIMG119" width="300">|
+| <img src="https://github.com/user-attachments/assets/477b6ceb-4b5e-456a-8b30-4c98cf594bfd" alt="WechatIMG119" width="300"> | <img src="https://github.com/user-attachments/assets/7cf89118-2b83-491b-903d-ba0153e3eba6" alt="WechatIMG119" width="300">|
 
 ### 飞书群
 
