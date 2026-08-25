@@ -80,11 +80,6 @@ func TestTimeoutE2E(t *testing.T) {
 func TestConstructorStall(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = w.Write([]byte("<!doctype html><html><body>constructor fixture</body></html>"))
-			if flusher, ok := w.(http.Flusher); ok {
-				flusher.Flush()
-			}
 			<-r.Context().Done()
 			return
 		}
