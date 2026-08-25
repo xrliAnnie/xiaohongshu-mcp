@@ -167,7 +167,7 @@ func NewSearchAction(page *rod.Page) *SearchAction {
 }
 
 func (s *SearchAction) Search(ctx context.Context, keyword string, limit int, filters ...FilterOption) ([]Feed, error) {
-	page := s.page.Context(ctx)
+	page := s.page.Context(ctx).Timeout(60 * time.Second)
 
 	searchURL := makeSearchURL(keyword)
 	page.MustNavigate(searchURL)

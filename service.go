@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -20,6 +21,15 @@ import (
 
 // XiaohongshuService 小红书业务服务
 type XiaohongshuService struct{}
+
+const (
+	shortBrowserOperationTimeout = 90 * time.Second
+	loginOperationTimeout        = 60 * time.Second
+	savedContentTimeout          = 5 * time.Minute
+	publishContentTimeout        = 8 * time.Minute
+	publishVideoTimeout          = 15 * time.Minute
+	feedDetailTimeout            = 12 * time.Minute
+)
 
 // NewXiaohongshuService 创建小红书服务实例
 func NewXiaohongshuService() *XiaohongshuService {
@@ -106,6 +116,12 @@ type UserProfileResponse struct {
 
 // DeleteCookies 删除 cookies 文件，用于登录重置
 func (s *XiaohongshuService) DeleteCookies(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, loginOperationTimeout)
+	defer cancel()
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	cookiePath := cookies.GetCookiesFilePath()
 	cookieLoader := cookies.NewLoadCookie(cookiePath)
 	return cookieLoader.DeleteCookies()
@@ -113,6 +129,9 @@ func (s *XiaohongshuService) DeleteCookies(ctx context.Context) error {
 
 // CheckLoginStatus 检查登录状态
 func (s *XiaohongshuService) CheckLoginStatus(ctx context.Context) (*LoginStatusResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, loginOperationTimeout)
+	defer cancel()
+
 	b := newBrowser()
 	defer b.Close()
 
@@ -136,20 +155,32 @@ func (s *XiaohongshuService) CheckLoginStatus(ctx context.Context) (*LoginStatus
 
 // GetLoginQrcode 获取登录的扫码二维码
 func (s *XiaohongshuService) GetLoginQrcode(ctx context.Context) (*LoginQrcodeResponse, error) {
-	b := newBrowser()
-	page := b.NewPage()
+	ctx, cancel := context.WithTimeout(ctx, loginOperationTimeout)
+	defer cancel()
 
-	deferFunc := func() {
-		_ = page.Close()
-		b.Close()
+	b := newBrowser()
+	var page *rod.Page
+	var cleanupOnce sync.Once
+	cleanup := func() {
+		cleanupOnce.Do(func() {
+			if page != nil {
+				_ = page.Close()
+			}
+			b.Close()
+		})
 	}
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			cleanup()
+		}
+	}()
+
+	page = b.NewPage()
 
 	loginAction := xiaohongshu.NewLogin(page)
 
 	img, loggedIn, err := loginAction.FetchQrcodeImage(ctx)
-	if err != nil || loggedIn {
-		defer deferFunc()
-	}
 	if err != nil {
 		return nil, err
 	}
@@ -158,16 +189,18 @@ func (s *XiaohongshuService) GetLoginQrcode(ctx context.Context) (*LoginQrcodeRe
 
 	if !loggedIn {
 		go func() {
-			ctxTimeout, cancel := context.WithTimeout(context.Background(), timeout)
-			defer cancel()
-			defer deferFunc()
+			runWithPanicSafeCleanup(cleanup, func() {
+				ctxTimeout, cancel := context.WithTimeout(context.Background(), timeout)
+				defer cancel()
 
-			if loginAction.WaitForLogin(ctxTimeout) {
-				if er := saveCookies(page); er != nil {
-					logrus.Errorf("failed to save cookies: %v", er)
+				if loginAction.WaitForLogin(ctxTimeout) {
+					if er := saveCookies(page); er != nil {
+						logrus.Errorf("failed to save cookies: %v", er)
+					}
 				}
-			}
+			})
 		}()
+		handedOff = true
 	}
 
 	return &LoginQrcodeResponse{
@@ -182,8 +215,28 @@ func (s *XiaohongshuService) GetLoginQrcode(ctx context.Context) (*LoginQrcodeRe
 	}, nil
 }
 
+func runWithPanicSafeCleanup(cleanup, work func()) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			logrus.Errorf("login background task panicked: %v", recovered)
+		}
+	}()
+	defer func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				logrus.Errorf("login background cleanup panicked: %v", recovered)
+			}
+		}()
+		cleanup()
+	}()
+	work()
+}
+
 // PublishContent 发布内容
 func (s *XiaohongshuService) PublishContent(ctx context.Context, req *PublishRequest) (*PublishResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, publishContentTimeout)
+	defer cancel()
+
 	// 验证标题长度（小红书限制：最大20个字）
 	if xhsutil.CalcTitleLength(req.Title) > 20 {
 		return nil, fmt.Errorf("标题长度超过限制")
@@ -274,6 +327,9 @@ func (s *XiaohongshuService) publishContent(ctx context.Context, content xiaohon
 
 // PublishVideo 发布视频（本地文件）
 func (s *XiaohongshuService) PublishVideo(ctx context.Context, req *PublishVideoRequest) (*PublishVideoResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, publishVideoTimeout)
+	defer cancel()
+
 	// 标题长度校验（小红书限制：最大20个字）
 	if xhsutil.CalcTitleLength(req.Title) > 20 {
 		return nil, fmt.Errorf("标题长度超过限制")
@@ -356,6 +412,9 @@ func (s *XiaohongshuService) publishVideo(ctx context.Context, content xiaohongs
 
 // ListFeeds 获取Feeds列表
 func (s *XiaohongshuService) ListFeeds(ctx context.Context) (*FeedsListResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, shortBrowserOperationTimeout)
+	defer cancel()
+
 	b := newBrowser()
 	defer b.Close()
 
@@ -381,6 +440,9 @@ func (s *XiaohongshuService) ListFeeds(ctx context.Context) (*FeedsListResponse,
 }
 
 func (s *XiaohongshuService) SearchFeeds(ctx context.Context, keyword string, limit int, filters ...xiaohongshu.FilterOption) (*FeedsListResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, shortBrowserOperationTimeout)
+	defer cancel()
+
 	b := newBrowser()
 	defer b.Close()
 
@@ -409,6 +471,9 @@ func (s *XiaohongshuService) GetFeedDetail(ctx context.Context, feedID, xsecToke
 
 // GetFeedDetailWithConfig 使用配置获取Feed详情
 func (s *XiaohongshuService) GetFeedDetailWithConfig(ctx context.Context, feedID, xsecToken string, loadAllComments bool, config xiaohongshu.CommentLoadConfig) (*FeedDetailResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, feedDetailTimeout)
+	defer cancel()
+
 	b := newBrowser()
 	defer b.Close()
 
@@ -434,6 +499,9 @@ func (s *XiaohongshuService) GetFeedDetailWithConfig(ctx context.Context, feedID
 
 // UserProfile 获取用户信息
 func (s *XiaohongshuService) UserProfile(ctx context.Context, userID, xsecToken string) (*UserProfileResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, shortBrowserOperationTimeout)
+	defer cancel()
+
 	b := newBrowser()
 	defer b.Close()
 
@@ -458,6 +526,9 @@ func (s *XiaohongshuService) UserProfile(ctx context.Context, userID, xsecToken 
 
 // PostCommentToFeed 发表评论到Feed
 func (s *XiaohongshuService) PostCommentToFeed(ctx context.Context, feedID, xsecToken, content string) (*PostCommentResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, feedDetailTimeout)
+	defer cancel()
+
 	b := newBrowser()
 	defer b.Close()
 
@@ -475,6 +546,9 @@ func (s *XiaohongshuService) PostCommentToFeed(ctx context.Context, feedID, xsec
 
 // LikeFeed 点赞笔记
 func (s *XiaohongshuService) LikeFeed(ctx context.Context, feedID, xsecToken string) (*ActionResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, shortBrowserOperationTimeout)
+	defer cancel()
+
 	b := newBrowser()
 	defer b.Close()
 
@@ -490,6 +564,9 @@ func (s *XiaohongshuService) LikeFeed(ctx context.Context, feedID, xsecToken str
 
 // UnlikeFeed 取消点赞笔记
 func (s *XiaohongshuService) UnlikeFeed(ctx context.Context, feedID, xsecToken string) (*ActionResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, shortBrowserOperationTimeout)
+	defer cancel()
+
 	b := newBrowser()
 	defer b.Close()
 
@@ -505,6 +582,9 @@ func (s *XiaohongshuService) UnlikeFeed(ctx context.Context, feedID, xsecToken s
 
 // FavoriteFeed 收藏笔记
 func (s *XiaohongshuService) FavoriteFeed(ctx context.Context, feedID, xsecToken string) (*ActionResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, shortBrowserOperationTimeout)
+	defer cancel()
+
 	b := newBrowser()
 	defer b.Close()
 
@@ -520,6 +600,9 @@ func (s *XiaohongshuService) FavoriteFeed(ctx context.Context, feedID, xsecToken
 
 // UnfavoriteFeed 取消收藏笔记
 func (s *XiaohongshuService) UnfavoriteFeed(ctx context.Context, feedID, xsecToken string) (*ActionResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, shortBrowserOperationTimeout)
+	defer cancel()
+
 	b := newBrowser()
 	defer b.Close()
 
@@ -535,6 +618,9 @@ func (s *XiaohongshuService) UnfavoriteFeed(ctx context.Context, feedID, xsecTok
 
 // ReplyCommentToFeed 回复指定评论
 func (s *XiaohongshuService) ReplyCommentToFeed(ctx context.Context, feedID, xsecToken, commentID, userID, content string) (*ReplyCommentResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, feedDetailTimeout)
+	defer cancel()
+
 	b := newBrowser()
 	defer b.Close()
 
@@ -588,6 +674,9 @@ func withBrowserPage(fn func(*rod.Page) error) error {
 
 // GetMyProfile 获取当前登录用户的个人信息
 func (s *XiaohongshuService) GetMyProfile(ctx context.Context) (*UserProfileResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, shortBrowserOperationTimeout)
+	defer cancel()
+
 	var result *xiaohongshu.UserProfileResponse
 	var err error
 
@@ -612,6 +701,9 @@ func (s *XiaohongshuService) GetMyProfile(ctx context.Context) (*UserProfileResp
 
 // ListCollections 列出当前登录用户的收藏夹
 func (s *XiaohongshuService) ListCollections(ctx context.Context, limit int) ([]xiaohongshu.Collection, error) {
+	ctx, cancel := context.WithTimeout(ctx, savedContentTimeout)
+	defer cancel()
+
 	b := newBrowser()
 	defer b.Close()
 
@@ -624,6 +716,9 @@ func (s *XiaohongshuService) ListCollections(ctx context.Context, limit int) ([]
 
 // GetCollectionContent 获取指定专辑的内容
 func (s *XiaohongshuService) GetCollectionContent(ctx context.Context, collectionID string, limit int) (*BoardNotesResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, savedContentTimeout)
+	defer cancel()
+
 	b := newBrowser()
 	defer b.Close()
 
@@ -645,6 +740,9 @@ func (s *XiaohongshuService) GetCollectionContent(ctx context.Context, collectio
 
 // ListSavedContent 获取全部收藏内容
 func (s *XiaohongshuService) ListSavedContent(ctx context.Context, limit int) (*FeedsListResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, savedContentTimeout)
+	defer cancel()
+
 	b := newBrowser()
 	defer b.Close()
 

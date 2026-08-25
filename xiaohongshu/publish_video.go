@@ -56,7 +56,7 @@ func (p *PublishAction) PublishVideo(ctx context.Context, content PublishVideoCo
 		return errors.New("视频不能为空")
 	}
 
-	page := p.page.Context(ctx)
+	page := p.page.Context(ctx).Timeout(300 * time.Second)
 
 	if err := uploadVideo(page, content.VideoPath); err != nil {
 		return errors.Wrap(err, "小红书上传视频失败")

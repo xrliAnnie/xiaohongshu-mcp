@@ -21,7 +21,7 @@ func NewUserProfileAction(page *rod.Page) *UserProfileAction {
 
 // UserProfile 获取用户基本信息及帖子
 func (u *UserProfileAction) UserProfile(ctx context.Context, userID, xsecToken string) (*UserProfileResponse, error) {
-	page := u.page.Context(ctx)
+	page := u.page.Context(ctx).Timeout(60 * time.Second)
 
 	searchURL := makeUserProfileURL(userID, xsecToken)
 	page.MustNavigate(searchURL)
@@ -106,7 +106,7 @@ func makeUserProfileURL(userID, xsecToken string) string {
 }
 
 func (u *UserProfileAction) GetMyProfileViaSidebar(ctx context.Context) (*UserProfileResponse, error) {
-	page := u.page.Context(ctx)
+	page := u.page.Context(ctx).Timeout(60 * time.Second)
 
 	// 创建导航动作
 	navigate := NewNavigate(page)

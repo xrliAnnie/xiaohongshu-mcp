@@ -54,7 +54,7 @@ func NewSavedContentAction(page *rod.Page) *SavedContentAction {
 
 // ListCollections 列出当前登录用户的所有收藏夹
 func (s *SavedContentAction) ListCollections(ctx context.Context, limit int) ([]Collection, error) {
-	page := s.page.Context(ctx)
+	page := s.page.Context(ctx).Timeout(180 * time.Second)
 
 	profileURL, err := s.safeNavigateToProfile(ctx)
 	if err != nil {
@@ -181,7 +181,7 @@ func (s *SavedContentAction) GetCollectionContent(ctx context.Context, collectio
 
 // ListSavedContent 获取全部收藏内容
 func (s *SavedContentAction) ListSavedContent(ctx context.Context, limit int) ([]Feed, error) {
-	page := s.page.Context(ctx)
+	page := s.page.Context(ctx).Timeout(180 * time.Second)
 
 	profileURL, err := s.safeNavigateToProfile(ctx)
 	if err != nil {
@@ -220,7 +220,7 @@ func (s *SavedContentAction) ListSavedContent(ctx context.Context, limit int) ([
 
 // safeNavigateToProfile 安全导航到个人主页（显式处理未登录）
 func (s *SavedContentAction) safeNavigateToProfile(ctx context.Context) (string, error) {
-	page := s.page.Context(ctx)
+	page := s.page.Context(ctx).Timeout(180 * time.Second)
 
 	if err := rod.Try(func() {
 		page.MustNavigate(configs.BaseURL() + "/explore")

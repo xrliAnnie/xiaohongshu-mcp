@@ -18,7 +18,7 @@ func NewLogin(page *rod.Page) *LoginAction {
 }
 
 func (a *LoginAction) CheckLoginStatus(ctx context.Context) (bool, error) {
-	pp := a.page.Context(ctx)
+	pp := a.page.Context(ctx).Timeout(60 * time.Second)
 	pp.MustNavigate(configs.BaseURL() + "/explore").MustWaitLoad()
 
 	time.Sleep(1 * time.Second)
@@ -36,7 +36,7 @@ func (a *LoginAction) CheckLoginStatus(ctx context.Context) (bool, error) {
 }
 
 func (a *LoginAction) Login(ctx context.Context) error {
-	pp := a.page.Context(ctx)
+	pp := a.page.Context(ctx).Timeout(60 * time.Second)
 
 	// 导航到小红书首页，这会触发二维码弹窗
 	pp.MustNavigate(configs.BaseURL() + "/explore").MustWaitLoad()
@@ -58,7 +58,7 @@ func (a *LoginAction) Login(ctx context.Context) error {
 }
 
 func (a *LoginAction) FetchQrcodeImage(ctx context.Context) (string, bool, error) {
-	pp := a.page.Context(ctx)
+	pp := a.page.Context(ctx).Timeout(60 * time.Second)
 
 	// 导航到小红书首页，这会触发二维码弹窗
 	pp.MustNavigate(configs.BaseURL() + "/explore").MustWaitLoad()
@@ -84,6 +84,7 @@ func (a *LoginAction) FetchQrcodeImage(ctx context.Context) (string, bool, error
 }
 
 func (a *LoginAction) WaitForLogin(ctx context.Context) bool {
+	// 扫码轮询由调用方的 4 分钟 context 统一控制，不能在这里缩短为 60 秒。
 	pp := a.page.Context(ctx)
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
