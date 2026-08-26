@@ -26,7 +26,7 @@ func NewFeedsListAction(page *rod.Page) *FeedsListAction {
 
 // GetFeedsList 获取页面的 Feed 列表数据
 func (f *FeedsListAction) GetFeedsList(ctx context.Context) ([]Feed, error) {
-	page := f.page.Context(ctx)
+	page := f.page.Context(ctx).Timeout(60 * time.Second)
 
 	time.Sleep(1 * time.Second)
 

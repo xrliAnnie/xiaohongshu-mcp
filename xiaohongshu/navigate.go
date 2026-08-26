@@ -2,6 +2,7 @@ package xiaohongshu
 
 import (
 	"context"
+	"time"
 
 	"github.com/go-rod/rod"
 	"github.com/xpzouying/xiaohongshu-mcp/configs"
@@ -16,7 +17,7 @@ func NewNavigate(page *rod.Page) *NavigateAction {
 }
 
 func (n *NavigateAction) ToExplorePage(ctx context.Context) error {
-	page := n.page.Context(ctx)
+	page := n.page.Context(ctx).Timeout(60 * time.Second)
 
 	page.MustNavigate(configs.BaseURL() + "/explore").
 		MustWaitLoad().
@@ -26,7 +27,7 @@ func (n *NavigateAction) ToExplorePage(ctx context.Context) error {
 }
 
 func (n *NavigateAction) ToProfilePage(ctx context.Context) error {
-	page := n.page.Context(ctx)
+	page := n.page.Context(ctx).Timeout(60 * time.Second)
 
 	// First navigate to explore page
 	if err := n.ToExplorePage(ctx); err != nil {

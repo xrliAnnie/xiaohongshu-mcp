@@ -75,7 +75,7 @@ func (p *PublishAction) Publish(ctx context.Context, content PublishImageContent
 		return errors.New("图片不能为空")
 	}
 
-	page := p.page.Context(ctx)
+	page := p.page.Context(ctx).Timeout(300 * time.Second)
 
 	if err := uploadImages(page, content.ImagePaths); err != nil {
 		return errors.Wrap(err, "小红书上传图片失败")
