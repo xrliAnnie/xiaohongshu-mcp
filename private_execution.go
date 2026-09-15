@@ -8,9 +8,10 @@ import (
 )
 
 type verifiedWrite struct {
-	lease  *accountLease
-	permit internalPermit
-	used   atomic.Bool
+	payload *preparedPayload
+	lease   *accountLease
+	permit  internalPermit
+	used    atomic.Bool
 }
 
 // Business writers must take this capability immediately before their single
@@ -20,6 +21,7 @@ func (v *verifiedWrite) take() bool {
 }
 
 type privateExecution struct {
+	payload                     *preparedPayload
 	mu                          sync.Mutex
 	lease                       *accountLease
 	journal                     *writeJournal
@@ -104,7 +106,7 @@ func (e *privateExecution) commit(ctx context.Context, raw []byte, signature str
 	if callCtx.Err() != nil {
 		return state
 	}
-	capability := &verifiedWrite{lease: lease, permit: permit}
+	capability := &verifiedWrite{lease: lease, permit: permit, payload: e.payload}
 	if err = e.dispatch(callCtx, capability); err == nil && capability.used.Load() {
 		state = "succeeded"
 	}

@@ -33,4 +33,4 @@ jobs:
         run: |
           XHS_TEST_BROWSER_BIN="$(command -v google-chrome)"
           export XHS_TEST_BROWSER_BIN
-          go test -race -tags integration -run '^Test(OriginalSetting|TopicSelection)SyntheticDOM$' -count=1 ./xiaohongshu
+          go test -race -tags integration -run '^Test(OriginalSetting|TopicSelection|ExactComment)SyntheticDOM$' -count=1 ./xiaohongshu

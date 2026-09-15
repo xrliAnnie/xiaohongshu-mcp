@@ -113,3 +113,32 @@ func TestTopicSelectionSyntheticDOM(t *testing.T) {
 		}
 	}
 }
+
+func TestExactCommentSyntheticDOM(t *testing.T) {
+	page := syntheticDOMPage(t)
+	for _, test := range []struct {
+		name, html, author string
+		ok                 bool
+	}{
+		{"exact", `<div id="comment-a"><div class="author" data-user-id="user-a"></div></div>`, "user-a", true},
+		{"wrong author", `<div id="comment-a"><div class="author" data-user-id="user-b"></div></div>`, "user-a", false},
+		{"missing author", `<div id="comment-a"></div>`, "user-a", false},
+		{"optional author", `<div id="comment-a"></div>`, "", true},
+		{"nested author", `<div id="comment-a"><div id="comment-b"><div class="author" data-user-id="user-a"></div></div></div>`, "user-a", false},
+		{"duplicate id", `<div id="comment-a"><div class="author" data-user-id="user-a"></div></div><div id="comment-a"></div>`, "user-a", false},
+		{"ambiguous author", `<div id="comment-a"><div class="author" data-user-id="user-a"></div><div class="author" data-user-id="user-b"></div></div>`, "user-a", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := page.SetDocumentContent(test.html); err != nil {
+				t.Fatal(err)
+			}
+			el, err := page.Element("#comment-a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (verifyExactComment(el, "a", test.author) == nil) != test.ok {
+				t.Fatal("incorrect exact comment binding")
+			}
+		})
+	}
+}

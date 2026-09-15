@@ -69,7 +69,7 @@ func newPayloadExecution(p *preparedPayload, lease *accountLease, journal *write
 	if policy.Audience != w.Account.ProviderInstanceID || lease.accountID != w.Account.AccountUserID || lease.epoch != w.Account.AccountEpoch || lease.generation != w.Account.ProviderGeneration || lease.digest != p.digest || journal.generation != lease.generation {
 		return nil, errAccountMismatch
 	}
-	e := &privateExecution{lease: lease, journal: journal, key: append([]byte(nil), policy.Key...), audience: policy.Audience, keyID: policy.KeyID, proposalID: p.proposalID, now: func() int64 { return time.Now().UnixMilli() }, admit: admit}
+	e := &privateExecution{payload: p, lease: lease, journal: journal, key: append([]byte(nil), policy.Key...), audience: policy.Audience, keyID: policy.KeyID, proposalID: p.proposalID, now: func() int64 { return time.Now().UnixMilli() }, admit: admit}
 	e.verifyPayload = func(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return errFrozenWrite

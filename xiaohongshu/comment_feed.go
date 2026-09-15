@@ -22,11 +22,11 @@ func NewCommentFeedAction(page *rod.Page) *CommentFeedAction {
 
 // PostComment 发表评论到 Feed
 func (f *CommentFeedAction) PostComment(ctx context.Context, feedID, xsecToken, content string) error {
-	// 不使用 Context(ctx)，避免继承外部 context 的超时
-	page := f.page.Timeout(60 * time.Second)
+	// Preserve the caller deadline.
+	page := f.page.Context(ctx).Timeout(60 * time.Second)
 
 	url := makeFeedDetailURL(feedID, xsecToken)
-	logrus.Infof("打开 feed 详情页: %s", url)
+	logrus.Info("打开 feed 详情页")
 
 	// 导航到详情页
 	page.MustNavigate(url)
@@ -81,11 +81,22 @@ func (f *CommentFeedAction) PostComment(ctx context.Context, feedID, xsecToken, 
 
 // ReplyToComment 回复指定评论
 func (f *CommentFeedAction) ReplyToComment(ctx context.Context, feedID, xsecToken, commentID, userID, content string) error {
+	return f.reply(ctx, feedID, xsecToken, commentID, userID, content, false)
+}
+
+// ReplyToExactComment never falls back to another comment by the same author.
+func (f *CommentFeedAction) ReplyToExactComment(ctx context.Context, feedID, xsecToken, commentID, userID, content string) error {
+	if commentID == "" {
+		return errCommentUnbound
+	}
+	return f.reply(ctx, feedID, xsecToken, commentID, userID, content, true)
+}
+func (f *CommentFeedAction) reply(ctx context.Context, feedID, xsecToken, commentID, userID, content string, exact bool) error {
 	// 增加超时时间，因为需要滚动查找评论
-	// 注意：不使用 Context(ctx)，避免继承外部 context 的超时
-	page := f.page.Timeout(5 * time.Minute)
+	// Preserve the caller deadline.
+	page := f.page.Context(ctx).Timeout(5 * time.Minute)
 	url := makeFeedDetailURL(feedID, xsecToken)
-	logrus.Infof("打开 feed 详情页进行回复: %s", url)
+	logrus.Info("打开 feed 详情页进行回复")
 
 	// 导航到详情页
 	page.MustNavigate(url)
@@ -101,9 +112,19 @@ func (f *CommentFeedAction) ReplyToComment(ctx context.Context, feedID, xsecToke
 	time.Sleep(2 * time.Second)
 
 	// 使用 Go 实现的查找逻辑
-	commentEl, err := findCommentElement(page, commentID, userID)
+	lookupUser := userID
+	if exact {
+		lookupUser = ""
+	}
+	commentEl, err := findCommentElement(page, commentID, lookupUser)
 	if err != nil {
 		return fmt.Errorf("无法找到评论: %w", err)
+	}
+
+	if exact {
+		if err := verifyExactComment(commentEl, commentID, userID); err != nil {
+			return err
+		}
 	}
 
 	// 滚动到评论位置
@@ -119,6 +140,11 @@ func (f *CommentFeedAction) ReplyToComment(ctx context.Context, feedID, xsecToke
 		return fmt.Errorf("无法找到回复按钮: %w", err)
 	}
 
+	if exact {
+		if err := verifyExactComment(commentEl, commentID, userID); err != nil {
+			return err
+		}
+	}
 	if err := replyBtn.Click(proto.InputMouseButtonLeft, 1); err != nil {
 		return fmt.Errorf("点击回复按钮失败: %w", err)
 	}
@@ -181,7 +207,7 @@ func findCommentElement(page *rod.Page, commentID, userID string) (*rod.Element,
 		// === 2. 获取当前评论数量 ===
 		currentCount := getCommentCount(page)
 		logrus.Infof("当前评论数: %d", currentCount)
-		
+
 		if currentCount != lastCommentCount {
 			logrus.Infof("✓ 评论数增加: %d -> %d", lastCommentCount, currentCount)
 			lastCommentCount = currentCount
@@ -202,7 +228,7 @@ func findCommentElement(page *rod.Page, commentID, userID string) (*rod.Element,
 		// === 4. 先滚动到最后一个评论（触发懒加载）===
 		if currentCount > 0 {
 			logrus.Infof("滚动到最后一个评论（共 %d 条）", currentCount)
-			
+
 			// 使用 Go 获取所有评论元素
 			elements, err := page.Timeout(2 * time.Second).Elements(".parent-comment, .comment-item, .comment")
 			if err == nil && len(elements) > 0 {
@@ -231,7 +257,7 @@ func findCommentElement(page *rod.Page, commentID, userID string) (*rod.Element,
 		if commentID != "" {
 			selector := fmt.Sprintf("#comment-%s", commentID)
 			logrus.Infof("尝试通过 commentID 查找: %s", selector)
-			
+
 			// 使用 Timeout 避免长时间等待
 			el, err := page.Timeout(2 * time.Second).Element(selector)
 			if err == nil && el != nil {
@@ -244,7 +270,7 @@ func findCommentElement(page *rod.Page, commentID, userID string) (*rod.Element,
 		// 通过 userID 查找
 		if userID != "" {
 			logrus.Infof("尝试通过 userID 查找: %s", userID)
-			
+
 			// 使用 Timeout 避免长时间等待
 			elements, err := page.Timeout(2 * time.Second).Elements(".comment-item, .comment, .parent-comment")
 			if err == nil && len(elements) > 0 {
@@ -262,7 +288,7 @@ func findCommentElement(page *rod.Page, commentID, userID string) (*rod.Element,
 				logrus.Infof("获取评论元素失败或超时: %v", err)
 			}
 		}
-		
+
 		logrus.Infof("本次尝试未找到目标评论，继续下一轮...")
 
 		// === 7. 等待内容加载 ===
