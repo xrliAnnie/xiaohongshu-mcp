@@ -30,6 +30,22 @@ func guardedRoutes(s *guardedService, uid uint32) http.Handler {
 			return
 		}
 		switch r.URL.Path {
+		case "/v1/read/list_feeds":
+			var empty struct{}
+			if !decodePrivateRequest(w, r, &empty) {
+				deny(400, "invalid_read_input")
+				return
+			}
+			result, err := s.readFeeds(r.Context())
+			if err != nil {
+				if err == errAccountBusy {
+					deny(409, "account_busy")
+				} else {
+					deny(503, "private_provider_unavailable")
+				}
+				return
+			}
+			reply(200, result)
 		case "/v1/account":
 			var empty struct{}
 			if !decodePrivateRequest(w, r, &empty) {
