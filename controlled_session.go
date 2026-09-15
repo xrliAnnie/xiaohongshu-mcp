@@ -68,11 +68,14 @@ func loadControlledCookies(path string, expected frozenAccount) (*controlledCook
 	if err != nil || pathErr != nil || rootErr != nil || !providerMediaFile(end, start.Size()) || !os.SameFile(start, current) || !os.SameFile(before, after) || !start.ModTime().Equal(end.ModTime()) {
 		return nil, errControlledCookies
 	}
+	return decodeControlledCookies(raw, expected)
+}
+func decodeControlledCookies(raw []byte, expected frozenAccount) (*controlledCookieRecord, error) {
 	unique := json.NewDecoder(bytes.NewReader(raw))
-	if _, err = uniqueRPCValue(unique, 0); err != nil {
+	if _, err := uniqueRPCValue(unique, 0); err != nil {
 		return nil, errControlledCookies
 	}
-	if _, err = unique.Token(); err != io.EOF {
+	if _, err := unique.Token(); err != io.EOF {
 		return nil, errControlledCookies
 	}
 	var record controlledCookieRecord
