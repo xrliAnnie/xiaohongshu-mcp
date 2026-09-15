@@ -27,7 +27,7 @@ func (s *guardedService) accountStatus(ctx context.Context) (result guardedAccou
 	s.manager.mu.Lock()
 	busy := s.manager.active != nil || s.manager.changing
 	s.manager.mu.Unlock()
-	if busy {
+	if busy && s.login == nil {
 		return result, errAccountBusy
 	}
 	account, cookiePath, err := s.config.Epochs.current()

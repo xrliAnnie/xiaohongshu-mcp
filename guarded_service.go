@@ -26,6 +26,8 @@ type guardedServiceConfig struct {
 	Resolve   guardedTokenResolver
 }
 type guardedService struct {
+	login      *privateLoginJob
+	openLogin  func(context.Context) (privateLoginSession, error)
 	config     guardedServiceConfig
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -67,6 +69,7 @@ func newGuardedService(ctx context.Context, c guardedServiceConfig) (*guardedSer
 	lifetime, cancel := context.WithCancel(ctx)
 	c.Execution.Key = append([]byte(nil), c.Execution.Key...)
 	s := &guardedService{config: c, ctx: lifetime, cancel: cancel, manager: manager, mediaRoot: info, executions: map[string]*privateExecution{}, dispatcher: newGuardedDispatcher(c.Resolve)}
+	s.openLogin = func(ctx context.Context) (privateLoginSession, error) { return openControlledLogin(ctx, c.Browser) }
 	s.open = func(ctx context.Context, path string, account frozenAccount) (accountLeaseSession, error) {
 		return openControlledSession(ctx, c.Browser, path, account)
 	}
@@ -246,6 +249,9 @@ func (s *guardedService) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var result error
+	if s.login != nil && s.login.close() != nil {
+		result = errPrivateProvider
+	}
 	s.manager.mu.Lock()
 	active := s.manager.active
 	s.manager.mu.Unlock()
