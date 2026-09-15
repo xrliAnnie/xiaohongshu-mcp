@@ -160,3 +160,7 @@ func failedPipeStartup(owned *PipeBrowser) (*PipeBrowser, error) {
 	}
 	return nil, errCDPPipe
 }
+
+// VerifyPinnedBinary is shared by guarded startup for the provider and decoder
+// executables. The same immutable root-owned ancestor policy applies to all.
+func VerifyPinnedBinary(path, digest string) error { return verifyPipeBinary(path, digest) }
