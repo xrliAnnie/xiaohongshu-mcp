@@ -193,10 +193,10 @@ func runGuardedProvider(ctx context.Context, path string) error {
 	if err != nil {
 		return errPrivateProvider
 	}
-	// Until exact orphan reconciliation is connected, never launch alongside an
-	// unaccounted profile left by an interrupted browser. Do not scan/kill Chrome.
-	profiles, err := os.ReadDir(c.ProfileRoot)
-	if err != nil || len(profiles) != 0 {
+	// Only completed receipts bound to this root/account/generation can remove
+	// old profiles. Unknown or interrupted owners still fail closed; no PID scan.
+	scope := browser.GuardianProfileScope{ProviderInstanceID: c.AccountBase.ProviderInstanceID, AccountUserID: c.AccountBase.AccountUserID, ProviderGeneration: c.AccountBase.ProviderGeneration}
+	if browser.ReconcileGuardianProfiles(c.ProfileRoot, scope) != nil {
 		return errPrivateProvider
 	}
 	epochs, err := openAccountEpochStore(c.EpochPath, c.AccountBase, false)
