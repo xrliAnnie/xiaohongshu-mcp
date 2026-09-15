@@ -1,8 +1,11 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -38,6 +41,25 @@ func TestGuardedStartupRejectsSharedModelGroup(t *testing.T) {
 	for _, groups := range [][]string{{"20", "600"}, {"bad"}, {}} {
 		if guardedSeparateGroup(600, groups) {
 			t.Fatal("shared or unknown group accepted")
+		}
+	}
+}
+
+func TestGuardedStartupPinsGuardianWithOtherExecutables(t *testing.T) {
+	raw, err := os.ReadFile("/usr/bin/true")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(raw)
+	pin := startupBinary{Path: "/usr/bin/true", SHA256: hex.EncodeToString(sum[:])}
+	c := guardedStartup{ProviderBinary: pin, Browser: pin, Guardian: pin, FFmpeg: pin, FFprobe: pin}
+	if verifyStartupBinaries(c) != nil {
+		t.Fatal("root-owned pinned fixture rejected")
+	}
+	for _, bad := range []startupBinary{{}, {Path: pin.Path, SHA256: strings.Repeat("0", 64)}, {Path: filepath.Join(t.TempDir(), "guardian"), SHA256: pin.SHA256}} {
+		c.Guardian = bad
+		if verifyStartupBinaries(c) == nil {
+			t.Fatal("missing/unpinned guardian accepted")
 		}
 	}
 }

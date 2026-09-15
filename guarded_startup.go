@@ -34,6 +34,7 @@ type guardedStartup struct {
 	AccountBase         frozenAccount `json:"accountBase"`
 	ProviderBinary      startupBinary `json:"providerBinary"`
 	Browser             startupBinary `json:"browser"`
+	Guardian            startupBinary `json:"guardian"`
 	FFmpeg              startupBinary `json:"ffmpeg"`
 	FFprobe             startupBinary `json:"ffprobe"`
 	ToolSchemaDigest    string        `json:"toolSchemaDigest"`
@@ -137,10 +138,8 @@ func loadGuardedStartup(ctx context.Context, path string) (guardedStartup, []byt
 	if err != nil || executable != c.ProviderBinary.Path {
 		return c, nil, errPrivateProvider
 	}
-	for _, pin := range []startupBinary{c.ProviderBinary, c.Browser, c.FFmpeg, c.FFprobe} {
-		if browser.VerifyPinnedBinary(pin.Path, pin.SHA256) != nil {
-			return c, nil, errPrivateProvider
-		}
+	if verifyStartupBinaries(c) != nil {
+		return c, nil, errPrivateProvider
 	}
 	schema, err := measuredGuardedSchema(ctx)
 	if err != nil || schema != c.ToolSchemaDigest {
@@ -257,4 +256,13 @@ func guardedSeparateGroup(serviceGroup int, modelGroups []string) bool {
 		}
 	}
 	return true
+}
+
+func verifyStartupBinaries(c guardedStartup) error {
+	for _, pin := range []startupBinary{c.ProviderBinary, c.Browser, c.Guardian, c.FFmpeg, c.FFprobe} {
+		if browser.VerifyPinnedBinary(pin.Path, pin.SHA256) != nil {
+			return errPrivateProvider
+		}
+	}
+	return nil
 }
