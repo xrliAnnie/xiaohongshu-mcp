@@ -26,17 +26,18 @@ type guardedServiceConfig struct {
 	Resolve   guardedTokenResolver
 }
 type guardedService struct {
-	login      *privateLoginJob
-	openLogin  func(context.Context) (privateLoginSession, error)
-	config     guardedServiceConfig
-	ctx        context.Context
-	cancel     context.CancelFunc
-	mu         sync.Mutex
-	manager    *accountLeaseManager
-	mediaRoot  os.FileInfo
-	executions map[string]*privateExecution
-	dispatcher *guardedDispatcher
-	open       func(context.Context, string, frozenAccount) (accountLeaseSession, error)
+	login        *privateLoginJob
+	failedLogins int
+	openLogin    func(context.Context) (privateLoginSession, error)
+	config       guardedServiceConfig
+	ctx          context.Context
+	cancel       context.CancelFunc
+	mu           sync.Mutex
+	manager      *accountLeaseManager
+	mediaRoot    os.FileInfo
+	executions   map[string]*privateExecution
+	dispatcher   *guardedDispatcher
+	open         func(context.Context, string, frozenAccount) (accountLeaseSession, error)
 }
 type preparedLease struct {
 	LeaseID            string `json:"leaseId"`

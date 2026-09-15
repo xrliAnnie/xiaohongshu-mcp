@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -155,5 +156,133 @@ func TestGuardedLoginDisconnectBeforeQRStopsOwnerStartup(t *testing.T) {
 	_, path, err := epochs.current()
 	if err != nil || path != "" {
 		t.Fatal("cancelled login persisted cookies")
+	}
+}
+
+func TestGuardedLoginExplicitRetryAuditedAndCapped(t *testing.T) {
+	s, _, _, writes := guardedServiceFixture(t)
+	epochs, base := epochFixture(t)
+	s.config.Epochs = epochs
+	s.manager, _ = newAccountLeaseManager(base.AccountUserID, base.AccountEpoch, base.ProviderGeneration)
+	var opens atomic.Int32
+	s.openLogin = func(context.Context) (privateLoginSession, error) {
+		count := opens.Add(1)
+		if count > 1 {
+			if _, err := os.Stat(filepath.Join(epochs.path, loginRetryName(base.AccountEpoch+int64(count)))); err != nil {
+				t.Error("login opened before durable retry audit", err)
+			}
+		}
+		return &loginSessionFixture{mode: "wait", id: base.AccountUserID, image: qrFixture(t, 32)}, nil
+	}
+	for attempt := 1; attempt <= 3; attempt++ {
+		_, _ = s.loginQR(context.Background())
+		select {
+		case <-s.login.done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("login did not end")
+		}
+		if opens.Load() != int32(attempt) {
+			t.Fatalf("explicit retry %d did not open new login", attempt)
+		}
+	}
+	if _, err := s.loginQR(context.Background()); err != errLoginRetryLimit {
+		t.Fatal("fourth failed login was not capped", err)
+	}
+	_, client := privateProviderFixture(t, uint32(os.Geteuid()), guardedRoutes(s, uint32(os.Geteuid())))
+	response, routeErr := client.Post("http://private/v1/read/get_login_qrcode", "application/json", strings.NewReader(`{}`))
+	if routeErr != nil {
+		t.Fatal(routeErr)
+	}
+	var denied map[string]string
+	decodeErr := json.NewDecoder(response.Body).Decode(&denied)
+	response.Body.Close()
+	if decodeErr != nil || response.StatusCode != 429 || denied["code"] != "login_retry_limit" {
+		t.Fatal("retry limit lacked fixed private denial")
+	}
+	if opens.Load() != 3 || writes.Load() != 0 {
+		t.Fatal("retry cap or write boundary violated")
+	}
+	current, cookie, err := epochs.current()
+	if err != nil || cookie != "" || current.AccountEpoch != base.AccountEpoch+3 {
+		t.Fatal("retry rewound epoch or persisted cookies", err)
+	}
+	config := s.config
+	config.Execution.Key = append([]byte(nil), s.config.Execution.Key...)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := newGuardedService(context.Background(), config)
+	if err != nil {
+		t.Fatal("durable restart failed", err)
+	}
+	defer restarted.Close()
+	restarted.openLogin = func(context.Context) (privateLoginSession, error) {
+		opens.Add(1)
+		return &loginSessionFixture{mode: "wait", id: base.AccountUserID, image: qrFixture(t, 32)}, nil
+	}
+	_, _ = restarted.loginQR(context.Background())
+	<-restarted.login.done
+	if opens.Load() != 4 {
+		t.Fatal("restart did not clear retry counter")
+	}
+	after, _, err := epochs.current()
+	if err != nil || after.AccountEpoch != current.AccountEpoch+1 {
+		t.Fatal("restart reset durable epoch", err)
+	}
+}
+func TestGuardedLoginRetryRequiresCleanupAndMatchingDurableEpoch(t *testing.T) {
+	for _, mode := range []string{"cleanup", "epoch"} {
+		t.Run(mode, func(t *testing.T) {
+			s, _, _, _ := guardedServiceFixture(t)
+			epochs, base := epochFixture(t)
+			s.config.Epochs = epochs
+			s.manager, _ = newAccountLeaseManager(base.AccountUserID, base.AccountEpoch, base.ProviderGeneration)
+			var opens atomic.Int32
+			s.openLogin = func(context.Context) (privateLoginSession, error) {
+				opens.Add(1)
+				return &loginSessionFixture{mode: map[string]string{"cleanup": "cleanup", "epoch": "wait"}[mode], id: "wrong-account", image: qrFixture(t, 32)}, nil
+			}
+			_, _ = s.loginQR(context.Background())
+			<-s.login.done
+			if mode == "epoch" {
+				s.manager.mu.Lock()
+				s.manager.epoch++
+				s.manager.mu.Unlock()
+			}
+			if _, err := s.loginQR(context.Background()); err == nil {
+				t.Fatal("unsafe recovery accepted")
+			}
+			if opens.Load() != 1 {
+				t.Fatal("unsafe retry opened browser")
+			}
+		})
+	}
+}
+
+func TestGuardedLoginSuccessClearsConsecutiveFailures(t *testing.T) {
+	s, _, _, _ := guardedServiceFixture(t)
+	epochs, base := epochFixture(t)
+	s.config.Epochs = epochs
+	s.manager, _ = newAccountLeaseManager(base.AccountUserID, base.AccountEpoch, base.ProviderGeneration)
+	var opens atomic.Int32
+	s.openLogin = func(context.Context) (privateLoginSession, error) {
+		mode := ""
+		if opens.Add(1) == 1 {
+			mode = "wait"
+		}
+		return &loginSessionFixture{mode: mode, id: base.AccountUserID, image: qrFixture(t, 32)}, nil
+	}
+	_, _ = s.loginQR(context.Background())
+	<-s.login.done
+	_, _ = s.loginQR(context.Background())
+	<-s.login.done
+	if s.failedLogins != 1 {
+		t.Fatal("failed login was not counted")
+	}
+	if _, err := s.loginQR(context.Background()); err != nil {
+		t.Fatal("successful login status failed", err)
+	}
+	if s.failedLogins != 0 || opens.Load() != 2 {
+		t.Fatal("success did not reset failure counter")
 	}
 }

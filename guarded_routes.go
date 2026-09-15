@@ -72,7 +72,9 @@ func guardedRoutes(s *guardedService, uid uint32) http.Handler {
 			}
 			result, err := s.loginQR(r.Context())
 			if err != nil {
-				if err == errAccountBusy {
+				if err == errLoginRetryLimit {
+					deny(429, "login_retry_limit")
+				} else if err == errAccountBusy {
 					deny(409, "account_busy")
 				} else {
 					deny(503, "private_provider_unavailable")

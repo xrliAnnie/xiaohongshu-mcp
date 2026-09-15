@@ -104,9 +104,24 @@ func (s *accountEpochStore) readState(dir *os.File) (frozenAccount, string, erro
 	}
 	epochs := []int64{}
 	cookies := map[int64]bool{}
+	retries := []int64{}
 	for _, entry := range entries {
 		name := entry.Name()
 		if name == ".base" {
+			continue
+		}
+
+		if strings.HasPrefix(name, "login-retry-") {
+			number, err := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(name, "login-retry-"), ".json"), 10, 64)
+			if err != nil || number <= s.base.AccountEpoch+1 || number > maxPermitInteger || name != loginRetryName(number) {
+				return fail()
+			}
+			raw, err := readJournalFile(dir, name)
+			expected, _ := json.Marshal(loginRetryAudit{OldEpoch: number - 1, NewEpoch: number, Cause: "explicit_login_retry"})
+			if err != nil || !bytes.Equal(raw, expected) {
+				return fail()
+			}
+			retries = append(retries, number)
 			continue
 		}
 		prefix := "epoch-"
@@ -153,6 +168,11 @@ func (s *accountEpochStore) readState(dir *os.File) (frozenAccount, string, erro
 	}
 	for epoch := range cookies {
 		if epoch > current.AccountEpoch {
+			return fail()
+		}
+	}
+	for _, next := range retries {
+		if next > current.AccountEpoch+1 || cookies[next-1] {
 			return fail()
 		}
 	}
@@ -239,4 +259,32 @@ func (s *accountEpochStore) replace(ctx context.Context, m *accountLeaseManager,
 		}
 		return s.finish(account, cookies)
 	})
+}
+
+// Audit precedes the next reservation and contains no cookies or credentials.
+// A crash may leave one audit for current+1; restart retains it and does not
+// pretend a new epoch or completed login already exists.
+type loginRetryAudit struct {
+	OldEpoch int64  `json:"oldEpoch"`
+	NewEpoch int64  `json:"newEpoch"`
+	Cause    string `json:"cause"`
+}
+
+func loginRetryName(next int64) string { return fmt.Sprintf("login-retry-%016d.json", next) }
+func (s *accountEpochStore) recordExplicitLoginRetry(expected frozenAccount) error {
+	dir, err := s.directory()
+	if err != nil {
+		return errControlledCookies
+	}
+	defer dir.Close()
+	current, cookie, err := s.readState(dir)
+	if err != nil || current != expected || cookie != "" || current.AccountEpoch <= s.base.AccountEpoch || current.AccountEpoch >= maxPermitInteger {
+		return errControlledCookies
+	}
+	entries, err := os.ReadDir(s.path)
+	if err != nil || len(entries) > 1020 {
+		return errControlledCookies
+	}
+	raw, _ := json.Marshal(loginRetryAudit{OldEpoch: current.AccountEpoch, NewEpoch: current.AccountEpoch + 1, Cause: "explicit_login_retry"})
+	return s.write(dir, loginRetryName(current.AccountEpoch+1), raw)
 }

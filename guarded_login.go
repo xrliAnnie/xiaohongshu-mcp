@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"github.com/go-rod/rod/lib/proto"
 	"sync"
 	"time"
 )
+
+var errLoginRetryLimit = errors.New("login_retry_limit")
 
 type guardedLoginQR struct {
 	Account   frozenAccount  `json:"account"`
@@ -18,23 +21,25 @@ type trackedLoginOwner struct {
 	privateLoginSession
 	once     sync.Once
 	closeErr error
+	closed   bool
 }
 
 func (o *trackedLoginOwner) Close() error {
-	o.once.Do(func() { o.closeErr = closePrivateLogin(o.privateLoginSession) })
+	o.once.Do(func() { o.closeErr = closePrivateLogin(o.privateLoginSession); o.closed = true })
 	return o.closeErr
 }
 
 type privateLoginJob struct {
-	started     chan struct{}
-	startedOnce sync.Once
-	mu          sync.Mutex
-	ready, done chan struct{}
-	readyOnce   sync.Once
-	cancel      context.CancelFunc
-	result      guardedLoginQR
-	err         error
-	owner       *trackedLoginOwner
+	started        chan struct{}
+	startedOnce    sync.Once
+	mu             sync.Mutex
+	ready, done    chan struct{}
+	readyOnce      sync.Once
+	cancel         context.CancelFunc
+	result         guardedLoginQR
+	err            error
+	owner          *trackedLoginOwner
+	failureCounted bool
 }
 
 func (j *privateLoginJob) await(ctx context.Context) (guardedLoginQR, error) {
@@ -117,6 +122,33 @@ func (s *guardedService) loginQR(ctx context.Context) (guardedLoginQR, error) {
 		return guardedLoginQR{}, errPrivateProvider
 	}
 	j := s.login
+	if j != nil {
+		select {
+		case <-j.done:
+			j.mu.Lock()
+			failed := j.err != nil
+			j.mu.Unlock()
+			if failed {
+				if !j.failureCounted {
+					s.failedLogins++
+					j.failureCounted = true
+				}
+				if s.failedLogins >= 3 {
+					s.mu.Unlock()
+					return guardedLoginQR{}, errLoginRetryLimit
+				}
+				if err := s.recoverLogin(ctx, j); err != nil {
+					s.mu.Unlock()
+					return guardedLoginQR{}, err
+				}
+				s.login = nil
+				j = nil
+			} else {
+				s.failedLogins = 0
+			}
+		default:
+		}
+	}
 	created := false
 	if j == nil {
 		s.manager.mu.Lock()
@@ -157,4 +189,26 @@ func (s *guardedService) loginQR(ctx context.Context) (guardedLoginQR, error) {
 		return guardedLoginQR{Account: status.Account, Upstream: status.Upstream, LoggedIn: status.LoggedIn}, err
 	}
 	return result, nil
+}
+
+// Only a new explicit QR request can reach this after j.done. Retain exclusion
+// unless the exact failed owner and durable account state prove safe recovery.
+func (s *guardedService) recoverLogin(ctx context.Context, j *privateLoginJob) error {
+	if j.owner == nil || !j.owner.closed || j.owner.closeErr != nil || ctx.Err() != nil {
+		return errPrivateProvider
+	}
+	account, cookie, err := s.config.Epochs.current()
+	if err != nil || cookie != "" {
+		return errPrivateProvider
+	}
+	s.manager.mu.Lock()
+	defer s.manager.mu.Unlock()
+	if !s.manager.changing || s.manager.active != nil || s.manager.accountID != account.AccountUserID || s.manager.generation != account.ProviderGeneration || s.manager.epoch != account.AccountEpoch {
+		return errPrivateProvider
+	}
+	if s.config.Epochs.recordExplicitLoginRetry(account) != nil || ctx.Err() != nil {
+		return errPrivateProvider
+	}
+	s.manager.changing = false
+	return nil
 }
