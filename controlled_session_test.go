@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
 	"github.com/xpzouying/xiaohongshu-mcp/browser"
 	"os"
@@ -102,5 +103,26 @@ func TestControlledSessionFailsBeforeBrowserForBadSnapshot(t *testing.T) {
 	session, err := openControlledSession(context.Background(), browser.PipeBrowserOptions{}, path, account)
 	if session != nil || err != errControlledCookies {
 		t.Fatal("did not reject cookie binding before launch", err)
+	}
+}
+
+func TestControlledSessionRejectsChangedCookieSnapshotBeforeCDP(t *testing.T) {
+	path, account := sessionCookieFixture(t)
+	record, err := loadControlledCookies(path, account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := &controlledSession{page: &rod.Page{}, cookiePath: path, account: account, cookieDigest: record.digest}
+	record.Cookies[0].Value = "changed-synthetic-session"
+	raw, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// The sentinel page has no browser transport; reaching CDP would panic.
+	if id, err := session.selfAccount(context.Background()); id != "" || err != errControlledCookies {
+		t.Fatal("session drift reached account read", err)
 	}
 }
