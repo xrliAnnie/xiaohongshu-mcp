@@ -1,0 +1,37 @@
+{
+	"expected": {
+		"publicKey": "olmHOIoN3oRMbimRoV+vxt3DLsFyPBHDpo7UadWFqds=",
+		"configDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"providerBinarySha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		"toolSchemaDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+		"probeSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		"manifestSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+		"bootstrapSha256": "2222222222222222222222222222222222222222222222222222222222222222"
+	},
+	"envelope": {
+		"statement": {
+			"schemaVersion": 1,
+			"configDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"providerBinarySha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			"toolSchemaDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+			"probeSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+			"manifestSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+			"bootstrapSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+			"probeKind": "fixture_harness",
+			"passed": true,
+			"hostAcceptance": false,
+			"notCovered": [
+				"real_claude_context",
+				"real_codex_context",
+				"real_runner_context",
+				"real_login_context",
+				"process_authority",
+				"privilege_paths",
+				"private_transport",
+				"headless_service",
+				"legacy_cutover"
+			]
+		},
+		"signature": "E3L7GqtqPSr85qHO8eISpqn8I7g8t3pQfja6xvjh3go5lfP24pYJ4WQdiX1+h8t7U/DftvPeNnHhtfVXrOXRAw=="
+	}
+}

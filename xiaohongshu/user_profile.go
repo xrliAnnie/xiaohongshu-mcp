@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -102,7 +103,7 @@ func (u *UserProfileAction) extractUserProfileData(page *rod.Page) (*UserProfile
 }
 
 func makeUserProfileURL(userID, xsecToken string) string {
-	return fmt.Sprintf(configs.BaseURL()+"/user/profile/%s?xsec_token=%s&xsec_source=pc_note", userID, xsecToken)
+	return configs.BaseURL() + "/user/profile/" + url.PathEscape(userID) + "?" + (url.Values{"xsec_token": {xsecToken}, "xsec_source": {"pc_note"}}).Encode()
 }
 
 func (u *UserProfileAction) GetMyProfileViaSidebar(ctx context.Context) (*UserProfileResponse, error) {
