@@ -1,0 +1,30 @@
+name: Guarded write tests
+
+on:
+  pull_request:
+  push:
+    branches: [main, flywheel-FLY-2551]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      XHS_COLLECTION_INTEGRATION: ""
+      XHS_RUN_NETWORK_TESTS: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Install synthetic media test dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ffmpeg
+      - name: Unit and race tests
+        run: go test -race -count=1 ./...
+      - name: Synthetic media decode integration
+        run: go test -race -tags integration -run '^TestProviderDecoder' -count=1 .
