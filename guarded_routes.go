@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // This handler also requires the kernel-derived context so accidental mounting
@@ -30,6 +31,23 @@ func guardedRoutes(s *guardedService, uid uint32) http.Handler {
 			return
 		}
 		switch r.URL.Path {
+		case "/v1/read/search_feeds", "/v1/read/get_feed_detail", "/v1/read/user_profile", "/v1/read/list_collections", "/v1/read/get_collection_content", "/v1/read/list_saved_content":
+			operation := strings.TrimPrefix(r.URL.Path, "/v1/read/")
+			input, ok := decodeGuardedRead(w, r, operation)
+			if !ok {
+				deny(400, "invalid_read_input")
+				return
+			}
+			result, err := s.readPrivate(r.Context(), operation, input)
+			if err != nil {
+				if err == errAccountBusy {
+					deny(409, "account_busy")
+				} else {
+					deny(503, "private_provider_unavailable")
+				}
+				return
+			}
+			reply(200, result)
 		case "/v1/read/list_feeds":
 			var empty struct{}
 			if !decodePrivateRequest(w, r, &empty) {

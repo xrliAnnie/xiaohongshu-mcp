@@ -18,9 +18,9 @@ type privateFeedsReader interface {
 // Results may contain platform tokens and are exclusively for the private
 // authority to project into opaque handles. Never mount this on a model MCP.
 type guardedFeedsResult struct {
-	Account  frozenAccount      `json:"account"`
-	Upstream frozenUpstream     `json:"upstream"`
-	Data     *FeedsListResponse `json:"data"`
+	Account  frozenAccount  `json:"account"`
+	Upstream frozenUpstream `json:"upstream"`
+	Data     any            `json:"data"`
 }
 
 func (s *controlledSession) readFeeds(ctx context.Context) (*FeedsListResponse, error) {
@@ -31,7 +31,17 @@ func (s *controlledSession) readFeeds(ctx context.Context) (*FeedsListResponse, 
 	return &FeedsListResponse{Feeds: feeds, Count: len(feeds)}, nil
 }
 
-func (s *guardedService) readFeeds(ctx context.Context) (result guardedFeedsResult, err error) {
+func (s *guardedService) readFeeds(ctx context.Context) (guardedFeedsResult, error) {
+	return s.readInSession(ctx, func(ctx context.Context, session accountLeaseSession) (any, error) {
+		reader, ok := session.(privateFeedsReader)
+		if !ok {
+			return nil, errPrivateProvider
+		}
+		return reader.readFeeds(ctx)
+	})
+}
+
+func (s *guardedService) readInSession(ctx context.Context, read func(context.Context, accountLeaseSession) (any, error)) (result guardedFeedsResult, err error) {
 	if !s.mu.TryLock() {
 		return result, errAccountBusy
 	}
@@ -47,7 +57,7 @@ func (s *guardedService) readFeeds(ctx context.Context) (result guardedFeedsResu
 	defer cancel()
 	stop := context.AfterFunc(s.ctx, cancel)
 	defer stop()
-	sum := sha256.Sum256([]byte("flywheel:xhs-private-read:list-feeds:v1"))
+	sum := sha256.Sum256([]byte("flywheel:xhs-private-read:v1"))
 	lease, err := s.manager.prepare(lifetime, hex.EncodeToString(sum[:]), 90*time.Second, func(c context.Context) (accountLeaseSession, error) { return s.open(c, cookiePath, account) })
 	if err != nil {
 		return result, err
@@ -62,11 +72,7 @@ func (s *guardedService) readFeeds(ctx context.Context) (result guardedFeedsResu
 	// cannot be released while this read and its final identity proof are active.
 	lease.operation.Lock()
 	defer lease.operation.Unlock()
-	reader, ok := lease.session.(privateFeedsReader)
-	if !ok {
-		return result, errPrivateProvider
-	}
-	data, err := reader.readFeeds(lease.ctx)
+	data, err := read(lease.ctx, lease.session)
 	if err != nil || data == nil || ctx.Err() != nil || s.ctx.Err() != nil || lease.recheckLocked(lifetime) != nil {
 		return result, errPrivateProvider
 	}
@@ -75,7 +81,7 @@ func (s *guardedService) readFeeds(ctx context.Context) (result guardedFeedsResu
 		return result, errAccountMismatch
 	}
 	raw, err := json.Marshal(data)
-	if err != nil || len(raw) > 196608 {
+	if err != nil || string(raw) == "null" || len(raw) > 196608 {
 		return result, errPrivateProvider
 	}
 	return guardedFeedsResult{Account: account, Upstream: s.config.Upstream, Data: data}, nil
