@@ -6,18 +6,22 @@ import (
 	"encoding/json"
 )
 
+var boundaryFixtureNotCovered = []string{"real_claude_context", "real_codex_context", "real_runner_context", "real_login_context", "process_authority", "privilege_paths", "private_transport", "headless_service", "legacy_cutover"}
+
 const boundarySignatureDomain = "flywheel:xhs-boundary:v1\n"
 
 type guardedBoundaryStatement struct {
-	SchemaVersion        int    `json:"schemaVersion"`
-	ConfigDigest         string `json:"configDigest"`
-	ProviderBinarySHA256 string `json:"providerBinarySha256"`
-	ToolSchemaDigest     string `json:"toolSchemaDigest"`
-	ProbeSHA256          string `json:"probeSha256"`
-	ManifestSHA256       string `json:"manifestSha256"`
-	BootstrapSHA256      string `json:"bootstrapSha256"`
-	ProbeKind            string `json:"probeKind"`
-	Passed               bool   `json:"passed"`
+	HostAcceptance       *bool    `json:"hostAcceptance"`
+	NotCovered           []string `json:"notCovered"`
+	SchemaVersion        int      `json:"schemaVersion"`
+	ConfigDigest         string   `json:"configDigest"`
+	ProviderBinarySHA256 string   `json:"providerBinarySha256"`
+	ToolSchemaDigest     string   `json:"toolSchemaDigest"`
+	ProbeSHA256          string   `json:"probeSha256"`
+	ManifestSHA256       string   `json:"manifestSha256"`
+	BootstrapSHA256      string   `json:"bootstrapSha256"`
+	ProbeKind            string   `json:"probeKind"`
+	Passed               bool     `json:"passed"`
 }
 type guardedBoundaryEnvelope struct {
 	Statement guardedBoundaryStatement `json:"statement"`
@@ -25,9 +29,9 @@ type guardedBoundaryEnvelope struct {
 }
 
 // All keys and values here are fixed ASCII protocol fields. The root QA signer
-// uses the same lexicographic JSON and signature domain, after actual host probes.
+// uses the same lexicographic JSON and signature domain for fixture evidence only.
 func canonicalBoundaryStatement(s guardedBoundaryStatement) []byte {
-	raw, _ := json.Marshal(map[string]any{"schemaVersion": s.SchemaVersion, "configDigest": s.ConfigDigest, "providerBinarySha256": s.ProviderBinarySHA256, "toolSchemaDigest": s.ToolSchemaDigest, "passed": s.Passed, "probeSha256": s.ProbeSHA256, "probeKind": s.ProbeKind, "manifestSha256": s.ManifestSHA256, "bootstrapSha256": s.BootstrapSHA256})
+	raw, _ := json.Marshal(map[string]any{"hostAcceptance": s.HostAcceptance, "notCovered": s.NotCovered, "schemaVersion": s.SchemaVersion, "configDigest": s.ConfigDigest, "providerBinarySha256": s.ProviderBinarySHA256, "toolSchemaDigest": s.ToolSchemaDigest, "passed": s.Passed, "probeSha256": s.ProbeSHA256, "probeKind": s.ProbeKind, "manifestSha256": s.ManifestSHA256, "bootstrapSha256": s.BootstrapSHA256})
 	return raw
 }
 
@@ -46,6 +50,14 @@ func verifyGuardedBoundary(raw, publicKey []byte, configDigest, binaryDigest, sc
 		return errPrivateProvider
 	}
 	statement := envelope.Statement
+	if statement.HostAcceptance == nil || *statement.HostAcceptance || len(statement.NotCovered) != len(boundaryFixtureNotCovered) {
+		return errPrivateProvider
+	}
+	for i, name := range boundaryFixtureNotCovered {
+		if statement.NotCovered[i] != name {
+			return errPrivateProvider
+		}
+	}
 	if statement.ManifestSHA256 != manifestDigest || statement.BootstrapSHA256 != bootstrapDigest {
 		return errPrivateProvider
 	}

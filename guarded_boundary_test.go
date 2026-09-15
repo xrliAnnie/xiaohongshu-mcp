@@ -10,6 +10,8 @@ import (
 	"testing"
 )
 
+var boundaryFixtureHostAcceptance = false
+
 var boundaryFixtureManifest = strings.Repeat("1", 64)
 var boundaryFixtureBootstrap = strings.Repeat("2", 64)
 
@@ -20,7 +22,7 @@ func TestGuardedBoundaryRequiresSignedMatchingMeasurements(t *testing.T) {
 	}
 	config, binary, schema := strings.Repeat("a", 64), strings.Repeat("b", 64), strings.Repeat("c", 64)
 	probe := strings.Repeat("e", 64)
-	statement := guardedBoundaryStatement{ManifestSHA256: boundaryFixtureManifest, BootstrapSHA256: boundaryFixtureBootstrap, ProbeKind: "fixture_harness", ProbeSHA256: probe, SchemaVersion: 1, ConfigDigest: config, ProviderBinarySHA256: binary, ToolSchemaDigest: schema, Passed: true}
+	statement := guardedBoundaryStatement{HostAcceptance: &boundaryFixtureHostAcceptance, NotCovered: boundaryFixtureNotCovered, ManifestSHA256: boundaryFixtureManifest, BootstrapSHA256: boundaryFixtureBootstrap, ProbeKind: "fixture_harness", ProbeSHA256: probe, SchemaVersion: 1, ConfigDigest: config, ProviderBinarySHA256: binary, ToolSchemaDigest: schema, Passed: true}
 	payload := canonicalBoundaryStatement(statement)
 	envelope := guardedBoundaryEnvelope{Statement: statement, Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(key, append([]byte(boundarySignatureDomain), payload...)))}
 	raw, _ := json.Marshal(envelope)
@@ -58,7 +60,7 @@ func TestGuardedBoundaryRequiresExplicitFixtureClassification(t *testing.T) {
 	pub, key, _ := ed25519.GenerateKey(rand.Reader)
 	config, binary, schema, probe := strings.Repeat("a", 64), strings.Repeat("b", 64), strings.Repeat("c", 64), strings.Repeat("e", 64)
 	for _, kind := range []string{"fixture_harness", "", "real_platform"} {
-		statement := map[string]any{"manifestSha256": boundaryFixtureManifest, "bootstrapSha256": boundaryFixtureBootstrap, "schemaVersion": 1, "configDigest": config, "providerBinarySha256": binary, "toolSchemaDigest": schema, "probeSha256": probe, "passed": true}
+		statement := map[string]any{"hostAcceptance": false, "notCovered": boundaryFixtureNotCovered, "manifestSha256": boundaryFixtureManifest, "bootstrapSha256": boundaryFixtureBootstrap, "schemaVersion": 1, "configDigest": config, "providerBinarySha256": binary, "toolSchemaDigest": schema, "probeSha256": probe, "passed": true}
 		if kind != "" {
 			statement["probeKind"] = kind
 		}
@@ -100,7 +102,7 @@ func TestGuardedBoundarySharedInstallationFixture(t *testing.T) {
 	if json.Unmarshal(f.Envelope, &envelope) != nil {
 		t.Fatal("bad envelope")
 	}
-	for _, name := range []string{"manifestSha256", "bootstrapSha256"} {
+	for _, name := range []string{"manifestSha256", "bootstrapSha256", "hostAcceptance", "notCovered"} {
 		var statement map[string]any
 		if json.Unmarshal(envelope["statement"], &statement) != nil {
 			t.Fatal("bad statement")
@@ -112,5 +114,44 @@ func TestGuardedBoundarySharedInstallationFixture(t *testing.T) {
 		if verifyGuardedBoundary(legacy, pub, f.Expected["configDigest"], f.Expected["providerBinarySha256"], f.Expected["toolSchemaDigest"], f.Expected["probeSha256"], f.Expected["manifestSha256"], f.Expected["bootstrapSha256"]) == nil {
 			t.Fatal("missing installation field accepted", name)
 		}
+	}
+}
+
+func TestGuardedBoundaryRejectsSignedHostAcceptanceClaims(t *testing.T) {
+	raw, err := os.ReadFile("testdata/boundary-installation.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f struct {
+		Expected map[string]string
+		Envelope struct{ Statement map[string]any }
+	}
+	if json.Unmarshal(raw, &f) != nil {
+		t.Fatal("bad fixture")
+	}
+	for _, change := range []string{"true", "short-scope", "missing-with-retained-signature"} {
+		t.Run(change, func(t *testing.T) {
+			statement := make(map[string]any)
+			for k, v := range f.Envelope.Statement {
+				statement[k] = v
+			}
+			pub, private, _ := ed25519.GenerateKey(rand.Reader)
+			if change == "true" {
+				statement["hostAcceptance"] = true
+			}
+			if change == "short-scope" {
+				statement["notCovered"] = []string{"legacy_cutover"}
+			}
+			payload, _ := json.Marshal(statement)
+			signature := base64.StdEncoding.EncodeToString(ed25519.Sign(private, append([]byte(boundarySignatureDomain), payload...)))
+			if change == "missing-with-retained-signature" {
+				delete(statement, "hostAcceptance")
+			}
+			altered, _ := json.Marshal(map[string]any{"statement": statement, "signature": signature})
+			e := f.Expected
+			if verifyGuardedBoundary(altered, pub, e["configDigest"], e["providerBinarySha256"], e["toolSchemaDigest"], e["probeSha256"], e["manifestSha256"], e["bootstrapSha256"]) == nil {
+				t.Fatal("ambiguous host claim accepted")
+			}
+		})
 	}
 }
