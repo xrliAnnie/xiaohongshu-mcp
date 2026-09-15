@@ -31,3 +31,13 @@ func TestGuardedStartupPrincipalSeparatesServiceAndModel(t *testing.T) {
 		}
 	}
 }
+func TestGuardedStartupRejectsSharedModelGroup(t *testing.T) {
+	if !guardedSeparateGroup(600, []string{"20", "80"}) {
+		t.Fatal("independent group rejected")
+	}
+	for _, groups := range [][]string{{"20", "600"}, {"bad"}, {}} {
+		if guardedSeparateGroup(600, groups) {
+			t.Fatal("shared or unknown group accepted")
+		}
+	}
+}

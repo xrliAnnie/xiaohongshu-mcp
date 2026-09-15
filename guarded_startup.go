@@ -10,8 +10,10 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/user"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -117,6 +119,14 @@ func loadGuardedStartup(ctx context.Context, path string) (guardedStartup, []byt
 	}
 	groups, err := os.Getgroups()
 	if err != nil || !guardedPrincipal(c.ModelUID, c.ServiceUID, c.ServiceGID, os.Geteuid(), os.Getegid(), groups) || c.SchemaVersion != 1 || c.PolicyVersion < 1 || c.PolicyVersion > maxPermitInteger {
+		return c, nil, errPrivateProvider
+	}
+	model, err := user.LookupId(strconv.Itoa(c.ModelUID))
+	if err != nil {
+		return c, nil, errPrivateProvider
+	}
+	modelGroups, err := model.GroupIds()
+	if err != nil || !guardedSeparateGroup(c.ServiceGID, modelGroups) {
 		return c, nil, errPrivateProvider
 	}
 	revision := regexp.MustCompile(`^[a-f0-9]{40}$`)
@@ -231,4 +241,17 @@ func runGuardedProvider(ctx context.Context, path string) error {
 		return errPrivateProvider
 	}
 	return nil
+}
+
+func guardedSeparateGroup(serviceGroup int, modelGroups []string) bool {
+	if len(modelGroups) == 0 {
+		return false
+	}
+	for _, group := range modelGroups {
+		value, err := strconv.Atoi(group)
+		if err != nil || value < 0 || value == serviceGroup {
+			return false
+		}
+	}
+	return true
 }
