@@ -51,7 +51,9 @@ func guardedServiceFixture(t *testing.T) (*guardedService, []byte, string, *atom
 	if os.Chmod(root, 0700) != nil {
 		t.Fatal("mode")
 	}
-	s, err := newGuardedService(context.Background(), guardedServiceConfig{Epochs: epochs, Journal: journal, MediaRoot: root, Upstream: w.Upstream, Execution: providerExecutionPolicy{Audience: current.ProviderInstanceID, KeyID: "key-a", Key: make([]byte, 32)}, Decode: func(context.Context, string, string) error { return nil }, Admit: func(context.Context, internalPermit) error { return nil }, Resolve: func(context.Context, frozenAccount, frozenTarget) (string, error) { return "synthetic-token", nil }})
+	s, err := newGuardedService(context.Background(), guardedServiceConfig{Epochs: epochs, Journal: journal, MediaRoot: root, Upstream: w.Upstream, Execution: providerExecutionPolicy{Audience: current.ProviderInstanceID, KeyID: "key-a", Key: make([]byte, 32)}, Decode: func(context.Context, string, string) error { return nil }, Admit: func(context.Context, internalPermit) error { return nil }, Resolve: func(context.Context, internalPermit, frozenAccount, frozenTarget) (string, error) {
+		return "synthetic-token", nil
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}

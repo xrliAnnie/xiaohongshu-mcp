@@ -13,7 +13,7 @@ type guardedWriteSession interface {
 	accountLeaseSession
 	writePage() *rod.Page
 }
-type guardedTokenResolver func(context.Context, frozenAccount, frozenTarget) (string, error)
+type guardedTokenResolver func(context.Context, internalPermit, frozenAccount, frozenTarget) (string, error)
 type guardedCommand struct {
 	operation                                 string
 	image                                     *xiaohongshu.PublishImageContent
@@ -54,7 +54,7 @@ func (d *guardedDispatcher) dispatch(ctx context.Context, v *verifiedWrite) erro
 		if d.resolve == nil || !journalID.MatchString(w.Target.FeedID) || w.Target.CommentID != nil && !journalID.MatchString(*w.Target.CommentID) || w.Target.UserID != nil && !journalID.MatchString(*w.Target.UserID) {
 			return errFrozenWrite
 		}
-		token, err = d.resolve(ctx, w.Account, *w.Target)
+		token, err = d.resolve(ctx, v.permit, w.Account, *w.Target)
 		if err != nil || token == "" || len(token) > 4096 {
 			return errFrozenWrite
 		}

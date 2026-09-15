@@ -44,9 +44,9 @@ func TestGuardedDispatcherUsesSameSessionAndBoundComment(t *testing.T) {
 	}
 	defer lease.Close()
 	tokenCalls, calls := 0, 0
-	d := newGuardedDispatcher(func(ctx context.Context, a frozenAccount, target frozenTarget) (string, error) {
+	d := newGuardedDispatcher(func(ctx context.Context, permit internalPermit, a frozenAccount, target frozenTarget) (string, error) {
 		tokenCalls++
-		if a != w.Account || target.FeedID != w.Target.FeedID {
+		if permit.ContentDigest != p.digest || permit.LeaseID != lease.id || a != w.Account || target.FeedID != w.Target.FeedID {
 			t.Fatal("unbound token resolution")
 		}
 		return "synthetic-token", nil
