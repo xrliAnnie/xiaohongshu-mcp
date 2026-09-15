@@ -45,6 +45,9 @@ func TestPipeProcessHelper(t *testing.T) {
 	if peer.Send(response) != nil {
 		os.Exit(5)
 	}
+	if os.Getenv("XHS_TEST_PIPE_EXIT") == "1" {
+		os.Exit(0)
+	}
 	for {
 		time.Sleep(time.Second)
 	}
