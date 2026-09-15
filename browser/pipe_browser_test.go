@@ -110,3 +110,31 @@ func TestPipeBrowserPreservesProfileWhenCleanupIsUnconfirmed(t *testing.T) {
 		t.Fatal("removed profile despite unconfirmed process cleanup")
 	}
 }
+
+func TestPipeBrowserRequiresGuardianPinAndScopeBeforeCreatingProfile(t *testing.T) {
+	options := pipeBrowserOptions(t)
+	for _, mode := range []string{"missing", "digest", "scope"} {
+		candidate := options
+		candidate.Scope = guardianScopeFixture
+		if mode != "missing" {
+			candidate.GuardianPath = options.BinaryPath
+			candidate.GuardianSHA256 = options.BinarySHA256
+		}
+		if mode == "digest" {
+			candidate.GuardianSHA256 = strings.Repeat("0", 64)
+		}
+		if mode == "scope" {
+			candidate.Scope = GuardianProfileScope{}
+		}
+		owner, err := LaunchPipeBrowser(context.Background(), candidate)
+		if owner != nil {
+			defer owner.Close()
+		}
+		if err == nil || owner != nil {
+			t.Fatal("unsafe production launch", mode)
+		}
+		if entries, _ := os.ReadDir(options.ProfileRoot); len(entries) != 0 {
+			t.Fatal("created profile before authority verification", mode)
+		}
+	}
+}

@@ -1,6 +1,6 @@
 # Chromium lifetime guardian
 
-`xhs-browser-guardian.c` is the fixed child-lifetime primitive approved by Flywheel ruling d40b384d. Compile with `cc -std=c11 -Wall -Wextra -Werror -O2`. It is not yet wired into provider startup; production still uses the existing direct owner until the pinned launcher and durable profile reconciliation are connected.
+`xhs-browser-guardian.c` is the fixed child-lifetime primitive approved by Flywheel ruling d40b384d. Compile with `cc -std=c11 -Wall -Wextra -Werror -O2`. Production browser launch uses this guardian after revalidating both executable pins and durably creating the scoped profile identity. Provider startup reconciles only exact completed receipts; unknown or incomplete profiles remain fail-closed.
 
 Arguments: trusted budget in milliseconds (1–240000), 64 lowercase hex nonce, absolute pinned browser executable and its fixed arguments. The caller must verify binary pins, create a private profile identity containing account/generation/UID and the same nonce, and open an exclusive empty 0600 cleanup file. No model values may select commands or duration.
 

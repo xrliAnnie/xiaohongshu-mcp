@@ -171,7 +171,7 @@ func readGuardianRecord(path string, result any) error {
 	}
 	return nil
 }
-func loadCompletedGuardianProfile(root, name string, scope GuardianProfileScope) (*guardianProfile, error) {
+func loadGuardianProfileOwner(root, name string, scope GuardianProfileScope) (*guardianProfile, error) {
 	if !validGuardianScope(scope) || !strings.HasPrefix(name, "lease-") || len(name) <= 6 || filepath.Base(name) != name {
 		return nil, errCDPPipe
 	}
@@ -192,6 +192,14 @@ func loadCompletedGuardianProfile(root, name string, scope GuardianProfileScope)
 	if err != nil || len(nonce) != 32 || hex.EncodeToString(nonce) != identity.Nonce || identity.SchemaVersion != 1 || identity.UID != uint32(os.Geteuid()) || identity.Scope != scope || identity.RootDevice != uint64(rootStat.Dev) || identity.RootInode != rootStat.Ino || identity.ProfileDevice != uint64(profileStat.Dev) || identity.ProfileInode != profileStat.Ino {
 		return nil, errCDPPipe
 	}
+	return &guardianProfile{root: root, path: path, identity: identity}, nil
+}
+func loadCompletedGuardianProfile(root, name string, scope GuardianProfileScope) (*guardianProfile, error) {
+	owner, err := loadGuardianProfileOwner(root, name, scope)
+	if err != nil {
+		return nil, errCDPPipe
+	}
+	path, identity := owner.path, owner.identity
 	var receipt guardianCleanupReceipt
 	if readGuardianRecord(filepath.Join(path, "cleanup.json"), &receipt) != nil || receipt.SchemaVersion != 1 || receipt.Nonce != identity.Nonce || receipt.PID <= 0 || receipt.PID > 2147483647 || !receipt.Cleaned {
 		return nil, errCDPPipe
@@ -242,6 +250,27 @@ func ReconcileGuardianProfiles(root string, scope GuardianProfileScope) error {
 		if p.removeCompleted() != nil {
 			return errCDPPipe
 		}
+	}
+	return nil
+}
+
+// Only the caller that observed exec.Cmd.Start fail may use this path. No child
+// inherited the receipt, so its still-empty exclusive file is not a recovery proof.
+func (p *guardianProfile) removeUnstarted() error {
+	owner, err := loadGuardianProfileOwner(p.root, filepath.Base(p.path), p.identity.Scope)
+	if err != nil || owner.identity != p.identity || p.receipt == nil {
+		return errCDPPipe
+	}
+	info, err := p.receipt.Stat()
+	current, pathErr := os.Lstat(filepath.Join(p.path, "cleanup.json"))
+	if err != nil || pathErr != nil || info.Size() != 0 || !os.SameFile(info, current) {
+		return errCDPPipe
+	}
+	if p.receipt.Close() != nil {
+		return errCDPPipe
+	}
+	if os.RemoveAll(p.path) != nil || syncGuardianDirectory(p.root) != nil {
+		return errCDPPipe
 	}
 	return nil
 }

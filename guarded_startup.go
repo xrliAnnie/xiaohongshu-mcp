@@ -216,7 +216,7 @@ func runGuardedProvider(ctx context.Context, path string) error {
 	if err != nil {
 		return errPrivateProvider
 	}
-	service, err := newGuardedService(ctx, guardedServiceConfig{Epochs: epochs, Journal: journal, MediaRoot: c.MediaRoot, Browser: browser.PipeBrowserOptions{BinaryPath: c.Browser.Path, BinarySHA256: c.Browser.SHA256, ProfileRoot: c.ProfileRoot}, Upstream: frozenUpstream{BinarySHA256: c.ProviderBinary.SHA256, ToolSchemaDigest: c.ToolSchemaDigest, GuardProtocol: 1}, Execution: providerExecutionPolicy{Audience: c.AccountBase.ProviderInstanceID, KeyID: c.KeyID, Key: key}, Decode: decode, Admit: authority.admit, Resolve: authority.resolve})
+	service, err := newGuardedService(ctx, guardedServiceConfig{Epochs: epochs, Journal: journal, MediaRoot: c.MediaRoot, Browser: browser.PipeBrowserOptions{BinaryPath: c.Browser.Path, BinarySHA256: c.Browser.SHA256, ProfileRoot: c.ProfileRoot, GuardianPath: c.Guardian.Path, GuardianSHA256: c.Guardian.SHA256, Scope: scope}, Upstream: frozenUpstream{BinarySHA256: c.ProviderBinary.SHA256, ToolSchemaDigest: c.ToolSchemaDigest, GuardProtocol: 1}, Execution: providerExecutionPolicy{Audience: c.AccountBase.ProviderInstanceID, KeyID: c.KeyID, Key: key}, Decode: decode, Admit: authority.admit, Resolve: authority.resolve})
 	if err != nil {
 		return errPrivateProvider
 	}

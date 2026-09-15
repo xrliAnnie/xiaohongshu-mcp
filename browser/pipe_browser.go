@@ -18,15 +18,21 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-type PipeBrowserOptions struct{ BinaryPath, BinarySHA256, ProfileRoot string }
+type PipeBrowserOptions struct {
+	BinaryPath, BinarySHA256, ProfileRoot string
+	GuardianPath, GuardianSHA256          string
+	Scope                                 GuardianProfileScope
+}
 type PipeBrowser struct {
-	Browser     *rod.Browser
-	process     *pipeProcess
-	profile     string
-	profileInfo os.FileInfo
-	cancel      context.CancelFunc
-	once        sync.Once
-	closeErr    error
+	Browser         *rod.Browser
+	process         *pipeProcess
+	profile         string
+	profileInfo     os.FileInfo
+	cancel          context.CancelFunc
+	once            sync.Once
+	closeErr        error
+	guardianProfile *guardianProfile
+	neverStarted    bool
 }
 
 // The executable and every parent must be root-owned and not writable by the
@@ -91,7 +97,10 @@ func preparePipeCommand(options PipeBrowserOptions) (*exec.Cmd, string, error) {
 	if err != nil {
 		return nil, "", errCDPPipe
 	}
-	cmd := exec.Command(options.BinaryPath,
+	return buildPipeCommand(options.BinaryPath, profile), profile, nil
+}
+func buildPipeCommand(binary, profile string) *exec.Cmd {
+	cmd := exec.Command(binary,
 		"--headless=new", "--remote-debugging-pipe", "--user-data-dir="+profile,
 		"--no-first-run", "--no-default-browser-check", "--disable-background-networking",
 		"--disable-component-update", "--disable-sync", "--disable-extensions",
@@ -99,7 +108,7 @@ func preparePipeCommand(options PipeBrowserOptions) (*exec.Cmd, string, error) {
 		"--password-store=basic", "--use-mock-keychain", "about:blank")
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=C", "LC_ALL=C", "HOME=" + profile, "TMPDIR=" + profile}
 	cmd.Dir = profile
-	return cmd, profile, nil
+	return cmd
 }
 func LaunchPipeBrowser(ctx context.Context, options PipeBrowserOptions) (*PipeBrowser, error) {
 	return launchPipeBrowser(ctx, options, 2*time.Minute)
@@ -114,14 +123,34 @@ func launchPipeBrowser(ctx context.Context, options PipeBrowserOptions, budget t
 	if ctx.Err() != nil {
 		return nil, errCDPPipe
 	}
-	cmd, profile, err := preparePipeCommand(options)
-	if err != nil {
-		return nil, err
+	// Verify both immutable binaries for every launch, before creating state.
+	if verifyPipeBinary(options.BinaryPath, options.BinarySHA256) != nil || verifyPipeBinary(options.GuardianPath, options.GuardianSHA256) != nil {
+		return nil, errCDPPipe
 	}
-	return launchPreparedPipeBrowserWithTimeout(ctx, cmd, profile, budget)
+	profile, err := createGuardianProfile(options.ProfileRoot, options.Scope)
+	if err != nil {
+		return nil, errCDPPipe
+	}
+	return launchPreparedGuardianBrowser(ctx, buildPipeCommand(options.BinaryPath, profile.path), options.GuardianPath, profile, budget)
 }
 
-// Only LaunchPipeBrowser supplies commands in production, after policy verification.
+func launchPreparedGuardianBrowser(ctx context.Context, cmd *exec.Cmd, guardian string, profile *guardianProfile, budget time.Duration) (*PipeBrowser, error) {
+	lifetime, cancel := context.WithCancel(ctx)
+	process, startErr := startGuardianProcess(lifetime, cmd, guardian, profile, budget)
+	owned := &PipeBrowser{process: process, profile: profile.path, guardianProfile: profile, cancel: cancel, neverStarted: process == nil}
+	if startErr != nil {
+		return failedPipeStartup(owned)
+	}
+	quiet := log.New(io.Discard, "", 0)
+	client := cdp.New().Logger(quiet).Start(process.transport)
+	owned.Browser = rod.New().Context(lifetime).ControlURL("").Monitor("").Trace(false).SlowMotion(0).Logger(quiet).Client(client)
+	if err := owned.Browser.Connect(); err != nil {
+		return failedPipeStartup(owned)
+	}
+	return owned, nil
+}
+
+// Direct-process fixture entry; production launches use launchPreparedGuardianBrowser.
 func launchPreparedPipeBrowser(ctx context.Context, cmd *exec.Cmd, profile string) (*PipeBrowser, error) {
 	return launchPreparedPipeBrowserWithTimeout(ctx, cmd, profile, 2*time.Minute)
 }
@@ -147,12 +176,30 @@ func launchPreparedPipeBrowserWithTimeout(ctx context.Context, cmd *exec.Cmd, pr
 	}
 	return owned, nil
 }
-func (b *PipeBrowser) PID() int { return b.process.pid }
+func (b *PipeBrowser) PID() int {
+	if b.process == nil {
+		return 0
+	}
+	return b.process.pid
+}
 func (b *PipeBrowser) Close() error {
 	b.once.Do(func() {
 		b.cancel()
-		if err := b.process.Close(); err != nil {
-			b.closeErr = err
+		if b.process != nil {
+			if err := b.process.Close(); err != nil {
+				b.closeErr = err
+				return
+			}
+		} else if !b.neverStarted {
+			b.closeErr = errCDPPipe
+			return
+		}
+		if b.guardianProfile != nil {
+			if b.neverStarted {
+				b.closeErr = b.guardianProfile.removeUnstarted()
+			} else {
+				b.closeErr = b.guardianProfile.removeCompleted()
+			}
 			return
 		}
 		current, err := os.Lstat(b.profile)
