@@ -98,6 +98,10 @@ func TestPipeBrowserPreservesProfileWhenCleanupIsUnconfirmed(t *testing.T) {
 	close(done)
 	process := &pipeProcess{stop: make(chan struct{}), done: done, cleanupErr: errCDPPipe}
 	browser := &PipeBrowser{process: process, profile: profile, profileInfo: info, cancel: func() {}}
+	retained, failure := failedPipeStartup(browser)
+	if retained != browser || failure == nil {
+		t.Fatal("lost ownership after failed cleanup")
+	}
 	if browser.Close() == nil {
 		t.Fatal("unconfirmed cleanup reported success")
 	}

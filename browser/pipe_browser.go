@@ -130,8 +130,7 @@ func launchPreparedPipeBrowser(ctx context.Context, cmd *exec.Cmd, profile strin
 	client := cdp.New().Logger(quiet).Start(process.transport)
 	owned.Browser = rod.New().Context(lifetime).ControlURL("").Monitor("").Trace(false).SlowMotion(0).Logger(quiet).Client(client)
 	if err = owned.Browser.Connect(); err != nil {
-		owned.Close()
-		return nil, errCDPPipe
+		return failedPipeStartup(owned)
 	}
 	return owned, nil
 }
@@ -151,4 +150,13 @@ func (b *PipeBrowser) Close() error {
 		b.closeErr = os.RemoveAll(b.profile)
 	})
 	return b.closeErr
+}
+
+// Preserve the owner for the lease manager when cleanup is uncertain. Returning
+// only an error would let it release account exclusion while a child may live.
+func failedPipeStartup(owned *PipeBrowser) (*PipeBrowser, error) {
+	if owned.Close() != nil {
+		return owned, errCDPPipe
+	}
+	return nil, errCDPPipe
 }
