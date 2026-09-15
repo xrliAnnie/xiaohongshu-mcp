@@ -16,7 +16,7 @@ func TestGuardedBoundaryRequiresSignedMatchingMeasurements(t *testing.T) {
 	}
 	config, binary, schema := strings.Repeat("a", 64), strings.Repeat("b", 64), strings.Repeat("c", 64)
 	probe := strings.Repeat("e", 64)
-	statement := guardedBoundaryStatement{ProbeSHA256: probe, SchemaVersion: 1, ConfigDigest: config, ProviderBinarySHA256: binary, ToolSchemaDigest: schema, Passed: true}
+	statement := guardedBoundaryStatement{ProbeKind: "fixture_harness", ProbeSHA256: probe, SchemaVersion: 1, ConfigDigest: config, ProviderBinarySHA256: binary, ToolSchemaDigest: schema, Passed: true}
 	payload := canonicalBoundaryStatement(statement)
 	envelope := guardedBoundaryEnvelope{Statement: statement, Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(key, append([]byte(boundarySignatureDomain), payload...)))}
 	raw, _ := json.Marshal(envelope)
@@ -47,5 +47,22 @@ func TestGuardedBoundaryRequiresSignedMatchingMeasurements(t *testing.T) {
 func TestGuardedBoundaryRejectsMissingReceipt(t *testing.T) {
 	if verifyGuardedBoundary(nil, make([]byte, 32), strings.Repeat("a", 64), strings.Repeat("b", 64), strings.Repeat("c", 64), strings.Repeat("e", 64)) == nil {
 		t.Fatal("missing proof accepted")
+	}
+}
+
+func TestGuardedBoundaryRequiresExplicitFixtureClassification(t *testing.T) {
+	pub, key, _ := ed25519.GenerateKey(rand.Reader)
+	config, binary, schema, probe := strings.Repeat("a", 64), strings.Repeat("b", 64), strings.Repeat("c", 64), strings.Repeat("e", 64)
+	for _, kind := range []string{"fixture_harness", "", "real_platform"} {
+		statement := map[string]any{"schemaVersion": 1, "configDigest": config, "providerBinarySha256": binary, "toolSchemaDigest": schema, "probeSha256": probe, "passed": true}
+		if kind != "" {
+			statement["probeKind"] = kind
+		}
+		payload, _ := json.Marshal(statement)
+		raw, _ := json.Marshal(map[string]any{"statement": statement, "signature": base64.StdEncoding.EncodeToString(ed25519.Sign(key, append([]byte(boundarySignatureDomain), payload...)))})
+		got := verifyGuardedBoundary(raw, pub, config, binary, schema, probe)
+		if (got == nil) != (kind == "fixture_harness") {
+			t.Fatalf("kind %q verification: %v", kind, got)
+		}
 	}
 }

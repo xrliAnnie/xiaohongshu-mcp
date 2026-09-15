@@ -14,6 +14,7 @@ type guardedBoundaryStatement struct {
 	ProviderBinarySHA256 string `json:"providerBinarySha256"`
 	ToolSchemaDigest     string `json:"toolSchemaDigest"`
 	ProbeSHA256          string `json:"probeSha256"`
+	ProbeKind            string `json:"probeKind"`
 	Passed               bool   `json:"passed"`
 }
 type guardedBoundaryEnvelope struct {
@@ -24,7 +25,7 @@ type guardedBoundaryEnvelope struct {
 // All keys and values here are fixed ASCII protocol fields. The root QA signer
 // uses the same lexicographic JSON and signature domain, after actual host probes.
 func canonicalBoundaryStatement(s guardedBoundaryStatement) []byte {
-	raw, _ := json.Marshal(map[string]any{"schemaVersion": s.SchemaVersion, "configDigest": s.ConfigDigest, "providerBinarySha256": s.ProviderBinarySHA256, "toolSchemaDigest": s.ToolSchemaDigest, "passed": s.Passed, "probeSha256": s.ProbeSHA256})
+	raw, _ := json.Marshal(map[string]any{"schemaVersion": s.SchemaVersion, "configDigest": s.ConfigDigest, "providerBinarySha256": s.ProviderBinarySHA256, "toolSchemaDigest": s.ToolSchemaDigest, "passed": s.Passed, "probeSha256": s.ProbeSHA256, "probeKind": s.ProbeKind})
 	return raw
 }
 
@@ -40,7 +41,7 @@ func verifyGuardedBoundary(raw, publicKey []byte, configDigest, binaryDigest, sc
 		return errPrivateProvider
 	}
 	statement := envelope.Statement
-	if statement.SchemaVersion != 1 || !statement.Passed || statement.ConfigDigest != configDigest || statement.ProviderBinarySHA256 != binaryDigest || statement.ToolSchemaDigest != schemaDigest || statement.ProbeSHA256 != probeDigest {
+	if statement.SchemaVersion != 1 || statement.ProbeKind != "fixture_harness" || !statement.Passed || statement.ConfigDigest != configDigest || statement.ProviderBinarySHA256 != binaryDigest || statement.ToolSchemaDigest != schemaDigest || statement.ProbeSHA256 != probeDigest {
 		return errPrivateProvider
 	}
 	signature, err := base64.StdEncoding.Strict().DecodeString(envelope.Signature)
