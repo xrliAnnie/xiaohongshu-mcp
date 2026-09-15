@@ -82,6 +82,9 @@ func (m *accountLeaseManager) prepare(ctx context.Context, digest string, durati
 func (l *accountLease) recheck(ctx context.Context) error {
 	l.operation.Lock()
 	defer l.operation.Unlock()
+	return l.recheckLocked(ctx)
+}
+func (l *accountLease) recheckLocked(ctx context.Context) error {
 	<-l.ready
 	if ctx.Err() != nil || l.ctx.Err() != nil || l.session == nil {
 		return errAccountMismatch
