@@ -13,6 +13,7 @@ type guardedBoundaryStatement struct {
 	ConfigDigest         string `json:"configDigest"`
 	ProviderBinarySHA256 string `json:"providerBinarySha256"`
 	ToolSchemaDigest     string `json:"toolSchemaDigest"`
+	ProbeSHA256          string `json:"probeSha256"`
 	Passed               bool   `json:"passed"`
 }
 type guardedBoundaryEnvelope struct {
@@ -23,15 +24,15 @@ type guardedBoundaryEnvelope struct {
 // All keys and values here are fixed ASCII protocol fields. The root QA signer
 // uses the same lexicographic JSON and signature domain, after actual host probes.
 func canonicalBoundaryStatement(s guardedBoundaryStatement) []byte {
-	raw, _ := json.Marshal(map[string]any{"schemaVersion": s.SchemaVersion, "configDigest": s.ConfigDigest, "providerBinarySha256": s.ProviderBinarySHA256, "toolSchemaDigest": s.ToolSchemaDigest, "passed": s.Passed})
+	raw, _ := json.Marshal(map[string]any{"schemaVersion": s.SchemaVersion, "configDigest": s.ConfigDigest, "providerBinarySha256": s.ProviderBinarySHA256, "toolSchemaDigest": s.ToolSchemaDigest, "passed": s.Passed, "probeSha256": s.ProbeSHA256})
 	return raw
 }
 
 // publicKey and configDigest must come from the immutable root-owned startup
 // policy; measured binary/schema digests must be computed locally. None may be
 // supplied by a model or an ingress request. This function never issues proofs.
-func verifyGuardedBoundary(raw, publicKey []byte, configDigest, binaryDigest, schemaDigest string) error {
-	if len(raw) > 4096 || len(publicKey) != ed25519.PublicKeySize || !journalDigest.MatchString(configDigest) || !journalDigest.MatchString(binaryDigest) || !journalDigest.MatchString(schemaDigest) {
+func verifyGuardedBoundary(raw, publicKey []byte, configDigest, binaryDigest, schemaDigest, probeDigest string) error {
+	if len(raw) > 4096 || len(publicKey) != ed25519.PublicKeySize || !journalDigest.MatchString(configDigest) || !journalDigest.MatchString(binaryDigest) || !journalDigest.MatchString(schemaDigest) || !journalDigest.MatchString(probeDigest) {
 		return errPrivateProvider
 	}
 	var envelope guardedBoundaryEnvelope
@@ -39,7 +40,7 @@ func verifyGuardedBoundary(raw, publicKey []byte, configDigest, binaryDigest, sc
 		return errPrivateProvider
 	}
 	statement := envelope.Statement
-	if statement.SchemaVersion != 1 || !statement.Passed || statement.ConfigDigest != configDigest || statement.ProviderBinarySHA256 != binaryDigest || statement.ToolSchemaDigest != schemaDigest {
+	if statement.SchemaVersion != 1 || !statement.Passed || statement.ConfigDigest != configDigest || statement.ProviderBinarySHA256 != binaryDigest || statement.ToolSchemaDigest != schemaDigest || statement.ProbeSHA256 != probeDigest {
 		return errPrivateProvider
 	}
 	signature, err := base64.StdEncoding.Strict().DecodeString(envelope.Signature)

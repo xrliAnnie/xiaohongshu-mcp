@@ -52,7 +52,7 @@ func TestGuardedStartupPinsGuardianWithOtherExecutables(t *testing.T) {
 	}
 	sum := sha256.Sum256(raw)
 	pin := startupBinary{Path: "/usr/bin/true", SHA256: hex.EncodeToString(sum[:])}
-	c := guardedStartup{ProviderBinary: pin, Browser: pin, Guardian: pin, FFmpeg: pin, FFprobe: pin}
+	c := guardedStartup{ProviderBinary: pin, Browser: pin, Guardian: pin, BoundaryProbe: pin, FFmpeg: pin, FFprobe: pin}
 	if verifyStartupBinaries(c) != nil {
 		t.Fatal("root-owned pinned fixture rejected")
 	}

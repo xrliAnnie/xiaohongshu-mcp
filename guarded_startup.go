@@ -35,6 +35,7 @@ type guardedStartup struct {
 	ProviderBinary      startupBinary `json:"providerBinary"`
 	Browser             startupBinary `json:"browser"`
 	Guardian            startupBinary `json:"guardian"`
+	BoundaryProbe       startupBinary `json:"boundaryProbe"`
 	FFmpeg              startupBinary `json:"ffmpeg"`
 	FFprobe             startupBinary `json:"ffprobe"`
 	ToolSchemaDigest    string        `json:"toolSchemaDigest"`
@@ -151,7 +152,7 @@ func loadGuardedStartup(ctx context.Context, path string) (guardedStartup, []byt
 		return c, nil, errPrivateProvider
 	}
 	proof, err := readGuardedFile(c.AcceptancePath, 0, 0644, 4096, c.ServiceUID)
-	if err != nil || verifyGuardedBoundary(proof, publicKey, hex.EncodeToString(configHash[:]), c.ProviderBinary.SHA256, schema) != nil {
+	if err != nil || verifyGuardedBoundary(proof, publicKey, hex.EncodeToString(configHash[:]), c.ProviderBinary.SHA256, schema, c.BoundaryProbe.SHA256) != nil {
 		return c, nil, errPrivateProvider
 	}
 	roots := []string{c.EpochPath, c.JournalPath, c.MediaRoot, c.ProfileRoot}
@@ -259,7 +260,7 @@ func guardedSeparateGroup(serviceGroup int, modelGroups []string) bool {
 }
 
 func verifyStartupBinaries(c guardedStartup) error {
-	for _, pin := range []startupBinary{c.ProviderBinary, c.Browser, c.Guardian, c.FFmpeg, c.FFprobe} {
+	for _, pin := range []startupBinary{c.ProviderBinary, c.Browser, c.Guardian, c.BoundaryProbe, c.FFmpeg, c.FFprobe} {
 		if browser.VerifyPinnedBinary(pin.Path, pin.SHA256) != nil {
 			return errPrivateProvider
 		}
