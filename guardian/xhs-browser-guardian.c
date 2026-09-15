@@ -69,7 +69,7 @@ int main(int argc, char **argv) {
         execv(argv[3], argv + 3);
 failed_exec:;
         char error = 'E';
-        (void)write(exec_status[1], &error, 1);
+        (void)write_all(exec_status[1], &error, 1);
         _exit(127);
     }
     close(exec_status[1]);
