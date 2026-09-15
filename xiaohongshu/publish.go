@@ -326,13 +326,8 @@ func submitPublish(page *rod.Page, title, content string, tags []string, schedul
 		return errors.Wrap(err, "设置可见范围失败")
 	}
 
-	// 处理原创声明
-	if isOriginal {
-		if err := setOriginal(page); err != nil {
-			slog.Warn("设置原创声明失败，继续发布", "error", err)
-		} else {
-			slog.Info("已声明原创")
-		}
+	if err := setOriginalState(page, isOriginal); err != nil {
+		return errors.Wrap(err, "设置原创声明失败")
 	}
 
 	// 绑定商品
@@ -887,66 +882,49 @@ func setDateTime(page *rod.Page, t time.Time) error {
 	return nil
 }
 
-// setOriginal 设置原创声明
-func setOriginal(page *rod.Page) error {
-	// 根据小红书创作者页面的实际结构：
-	// div.custom-switch-card 包含 span.has-tips 文本为"原创声明"
-	// 开关是 div.d-switch 组件
-
-	// 查找包含"原创声明"文本的 custom-switch-card
-	switchCards, err := page.Elements("div.custom-switch-card")
+// setOriginalState applies both approved values and verifies the resulting UI state.
+func setOriginalState(page *rod.Page, desired bool) error {
+	cards, err := page.Elements("div.custom-switch-card")
 	if err != nil {
-		return errors.Wrap(err, "查找原创声明卡片失败")
+		return errInteractionState
 	}
-
-	for _, card := range switchCards {
+	var matches []*rod.Element
+	for _, card := range cards {
 		text, err := card.Text()
 		if err != nil {
-			continue
+			return errInteractionState
 		}
-
-		// 检查是否是原创声明卡片
-		if !strings.Contains(text, "原创声明") {
-			continue
+		if strings.Contains(text, "原创声明") {
+			matches = append(matches, card)
 		}
-
-		// 找到原创声明卡片，查找其中的 d-switch
-		switchElem, err := card.Element("div.d-switch")
-		if err != nil {
-			continue
-		}
-
-		// 检查开关是否已打开
-		checked, err := switchElem.Eval(`() => {
-			const input = this.querySelector('input[type="checkbox"]');
-			return input ? input.checked : false;
-		}`)
-		if err != nil {
-			continue
-		}
-
-		if checked.Value.Bool() {
-			slog.Info("原创声明已开启")
-			return nil
-		}
-
-		// 点击开关
-		if err := switchElem.Click(proto.InputMouseButtonLeft, 1); err != nil {
-			return errors.Wrap(err, "点击原创声明开关失败")
-		}
-
-		time.Sleep(500 * time.Millisecond)
-
-		// 处理原创声明确认弹窗
-		if err := confirmOriginalDeclaration(page); err != nil {
-			return errors.Wrap(err, "确认原创声明失败")
-		}
-
-		slog.Info("已开启原创声明")
-		return nil
 	}
-
-	return errors.New("未找到原创声明选项")
+	if len(matches) != 1 {
+		return errInteractionState
+	}
+	switches, err := matches[0].Elements("div.d-switch")
+	if err != nil || len(switches) != 1 {
+		return errInteractionState
+	}
+	element := switches[0]
+	read := func() (bool, error) {
+		result, err := element.Eval(`function(){const input=this.querySelector('input[type="checkbox"]');if(!input)throw new Error('original_state_unavailable');return input.checked;}`)
+		if err != nil {
+			return false, errInteractionState
+		}
+		return result.Value.Bool(), nil
+	}
+	click := func() error {
+		if err := element.Click(proto.InputMouseButtonLeft, 1); err != nil {
+			return errInteractionUnknown
+		}
+		if desired {
+			if err := confirmOriginalDeclaration(page); err != nil {
+				return err
+			}
+		}
+		return element.Wait(rod.Eval(`function(desired){const input=this.querySelector('input[type="checkbox"]');return !!input && input.checked===desired;}`, desired))
+	}
+	return singleToggle(page.GetContext(), desired, read, click, func(context.Context) error { return nil })
 }
 
 // confirmOriginalDeclaration 处理原创声明确认弹窗

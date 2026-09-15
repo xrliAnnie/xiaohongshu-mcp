@@ -28,3 +28,9 @@ jobs:
         run: go test -race -count=1 ./...
       - name: Synthetic media decode integration
         run: go test -race -tags integration -run '^TestProviderDecoder' -count=1 .
+
+      - name: Synthetic original-setting DOM
+        run: |
+          XHS_TEST_BROWSER_BIN="$(command -v google-chrome)"
+          export XHS_TEST_BROWSER_BIN
+          go test -race -tags integration -run '^TestOriginalSettingSyntheticDOM$' -count=1 ./xiaohongshu

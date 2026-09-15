@@ -13,6 +13,7 @@ import (
 
 // PublishVideoContent 发布视频内容
 type PublishVideoContent struct {
+	IsOriginal   bool
 	Title        string
 	Content      string
 	Tags         []string
@@ -62,7 +63,7 @@ func (p *PublishAction) PublishVideo(ctx context.Context, content PublishVideoCo
 		return errors.Wrap(err, "小红书上传视频失败")
 	}
 
-	if err := submitPublishVideo(page, content.Title, content.Content, content.Tags, content.ScheduleTime, content.Visibility, content.Products); err != nil {
+	if err := submitPublishVideo(page, content.Title, content.Content, content.Tags, content.ScheduleTime, content.IsOriginal, content.Visibility, content.Products); err != nil {
 		return errors.Wrap(err, "小红书发布失败")
 	}
 	return nil
@@ -99,7 +100,7 @@ func uploadVideo(page *rod.Page, videoPath string) error {
 }
 
 // submitPublishVideo 填写标题、正文、标签并点击发布（等待按钮可点击后再提交）
-func submitPublishVideo(page *rod.Page, title, content string, tags []string, scheduleTime *time.Time, visibility string, products []string) error {
+func submitPublishVideo(page *rod.Page, title, content string, tags []string, scheduleTime *time.Time, isOriginal bool, visibility string, products []string) error {
 	// 标题
 	titleElem, err := page.Element("div.d-input input")
 	if err != nil {
@@ -138,6 +139,10 @@ func submitPublishVideo(page *rod.Page, title, content string, tags []string, sc
 	// 设置可见范围
 	if err := setVisibility(page, visibility); err != nil {
 		return errors.Wrap(err, "设置可见范围失败")
+	}
+
+	if err := setOriginalState(page, isOriginal); err != nil {
+		return errors.Wrap(err, "设置原创声明失败")
 	}
 
 	// 绑定商品
