@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sync/atomic"
+	"syscall"
 	"testing"
 )
 
@@ -39,7 +41,7 @@ func TestAuthorityClientBindsAdmissionAndTokenOverPrivateSocket(t *testing.T) {
 			w.WriteHeader(404)
 		}
 	}))
-	client, err := newAuthorityClient(server.path, uint32(os.Geteuid()))
+	client, err := newFixtureAuthorityClient(server.path, uint32(os.Geteuid()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +84,7 @@ func TestAuthorityClientDeniesMismatchRedirectAndMalformed(t *testing.T) {
 					json.NewEncoder(w).Encode(map[string]any{"admitted": mode != "denied", "permitDigest": "wrong"})
 				}
 			}))
-			c, err := newAuthorityClient(server.path, uint32(os.Geteuid()))
+			c, err := newFixtureAuthorityClient(server.path, uint32(os.Geteuid()))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -95,7 +97,7 @@ func TestAuthorityClientDeniesMismatchRedirectAndMalformed(t *testing.T) {
 }
 func TestAuthorityClientRejectsWrongOwner(t *testing.T) {
 	server, _ := privateProviderFixture(t, uint32(os.Geteuid()), http.NotFoundHandler())
-	if _, err := newAuthorityClient(server.path, uint32(os.Geteuid()+1)); err == nil {
+	if _, err := newFixtureAuthorityClient(server.path, uint32(os.Geteuid()+1)); err == nil {
 		t.Fatal("accepted wrong authority UID")
 	}
 }
@@ -116,7 +118,7 @@ func TestAuthorityClientDoesNotRetryLostAdmissionResponse(t *testing.T) {
 		}
 		conn.Close()
 	}))
-	c, err := newAuthorityClient(server.path, uint32(os.Geteuid()))
+	c, err := newFixtureAuthorityClient(server.path, uint32(os.Geteuid()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +135,7 @@ func TestAuthorityClientRechecksSocketPermissionsBeforeEachRequest(t *testing.T)
 	}
 	var calls atomic.Int32
 	server, _ := privateProviderFixture(t, uint32(os.Geteuid()), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); w.WriteHeader(500) }))
-	c, err := newAuthorityClient(server.path, uint32(os.Geteuid()))
+	c, err := newFixtureAuthorityClient(server.path, uint32(os.Geteuid()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,5 +146,52 @@ func TestAuthorityClientRechecksSocketPermissionsBeforeEachRequest(t *testing.T)
 	defer os.Chmod(server.path, 0600)
 	if c.admit(context.Background(), p) == nil || calls.Load() != 0 {
 		t.Fatal("drifted socket used")
+	}
+}
+
+// Existing protocol tests use a real user-owned listener. This fixture supplies
+// its own guard; production startup can only select newAuthorityClient's root layout.
+func newFixtureAuthorityClient(path string, uid uint32) (*authorityClient, error) {
+	parent, err := os.Lstat(filepath.Dir(path))
+	if err != nil {
+		return nil, err
+	}
+	socket, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	return newAuthorityTransport(path, uid, func() error {
+		p, err := os.Lstat(filepath.Dir(path))
+		if err != nil || !os.SameFile(parent, p) || !p.IsDir() || p.Mode().Perm() != 0700 {
+			return errPrivateProvider
+		}
+		s, err := os.Lstat(path)
+		if err != nil || !os.SameFile(socket, s) || s.Mode()&os.ModeType != os.ModeSocket || s.Mode().Perm() != 0600 {
+			return errPrivateProvider
+		}
+		for _, info := range []os.FileInfo{p, s} {
+			owner, ok := info.Sys().(*syscall.Stat_t)
+			if !ok || owner.Uid != uid {
+				return errPrivateProvider
+			}
+		}
+		return nil
+	})
+}
+
+func TestAuthorityClientProductionRejectsUserOwnedSocket(t *testing.T) {
+	server, _ := privateProviderFixture(t, uint32(os.Geteuid()), http.NotFoundHandler())
+	if _, err := newAuthorityClient(server.path, uint32(os.Getegid())); err == nil {
+		t.Fatal("non-root socket accepted")
+	}
+	var calls atomic.Int32
+	other, _ := privateProviderFixture(t, uint32(os.Geteuid()), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1) }))
+	client, err := newAuthorityTransport(other.path, 0, func() error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	if client.post(context.Background(), "/internal/v1/provider-admission", []byte(`{}`), &struct{}{}) == nil || calls.Load() != 0 {
+		t.Fatal("root pin accepted user listener")
 	}
 }

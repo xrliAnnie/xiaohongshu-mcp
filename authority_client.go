@@ -18,31 +18,71 @@ import (
 )
 
 type authorityClient struct {
-	path           string
-	uid            uint32
-	parent, socket os.FileInfo
-	transport      *http.Transport
-	client         *http.Client
+	path      string
+	uid       uint32
+	check     func() error
+	transport *http.Transport
+	client    *http.Client
 }
 
-// The path and UID come from trusted startup policy. Every request uses a new
-// Unix connection with kernel peer checks; there is no proxy, TCP or redirect lane.
-func newAuthorityClient(path string, uid uint32) (*authorityClient, error) {
-	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
-		return nil, errPrivateProvider
-	}
-	parent, err := os.Lstat(filepath.Dir(path))
+// Only the verified startup policy may supply this path and service group.
+// launchd called listen as root; filesystem ownership is checked separately.
+func newAuthorityClient(path string, group uint32) (*authorityClient, error) {
+	parent, socket, err := authoritySocketSnapshot(path, group, os.Lstat)
 	if err != nil {
 		return nil, errPrivateProvider
 	}
-	socket, err := os.Lstat(path)
-	if err != nil {
+	return newAuthorityTransport(path, 0, func() error {
+		currentParent, currentSocket, err := authoritySocketSnapshot(path, group, os.Lstat)
+		if err != nil || !os.SameFile(parent, currentParent) || !os.SameFile(socket, currentSocket) {
+			return errPrivateProvider
+		}
+		return nil
+	})
+}
+
+func authoritySocketSnapshot(path string, group uint32, observe func(string) (os.FileInfo, error)) (os.FileInfo, os.FileInfo, error) {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path || strings.ContainsRune(path, 0) || group == 0 || group == 80 {
+		return nil, nil, errPrivateProvider
+	}
+	var parent os.FileInfo
+	for current := filepath.Dir(path); ; current = filepath.Dir(current) {
+		info, err := observe(current)
+		if err != nil || !info.IsDir() || info.Mode()&(os.ModeSymlink|os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 || info.Mode().Perm()&0022 != 0 {
+			return nil, nil, errPrivateProvider
+		}
+		owner, ok := info.Sys().(*syscall.Stat_t)
+		if !ok || owner.Uid != 0 {
+			return nil, nil, errPrivateProvider
+		}
+		if current == filepath.Dir(path) {
+			if owner.Gid != group || info.Mode().Perm() != 0750 {
+				return nil, nil, errPrivateProvider
+			}
+			parent = info
+		}
+		if filepath.Dir(current) == current {
+			break
+		}
+	}
+	socket, err := observe(path)
+	if err != nil || socket.Mode()&os.ModeType != os.ModeSocket || socket.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 || socket.Mode().Perm() != 0660 {
+		return nil, nil, errPrivateProvider
+	}
+	owner, ok := socket.Sys().(*syscall.Stat_t)
+	if !ok || owner.Uid != 0 || owner.Gid != group || owner.Nlink != 1 {
+		return nil, nil, errPrivateProvider
+	}
+	return parent, socket, nil
+}
+
+// A transport has no path fallback: every fresh connection is guarded before
+// dialing and after the exact native peer check. No redirects or retries.
+func newAuthorityTransport(path string, uid uint32, check func() error) (*authorityClient, error) {
+	if check == nil || check() != nil {
 		return nil, errPrivateProvider
 	}
-	c := &authorityClient{path: path, uid: uid, parent: parent, socket: socket}
-	if c.check() != nil {
-		return nil, errPrivateProvider
-	}
+	c := &authorityClient{path: path, uid: uid, check: check}
 	c.transport = &http.Transport{DisableKeepAlives: true, MaxResponseHeaderBytes: 8192, ResponseHeaderTimeout: 5 * time.Second, DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 		if network != "tcp" || address != "authority:80" || c.check() != nil {
 			return nil, errPrivateProvider
@@ -60,23 +100,6 @@ func newAuthorityClient(path string, uid uint32) (*authorityClient, error) {
 	}}
 	c.client = &http.Client{Transport: c.transport, Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	return c, nil
-}
-func (c *authorityClient) check() error {
-	parent, err := os.Lstat(filepath.Dir(c.path))
-	if err != nil || !os.SameFile(parent, c.parent) || !parent.IsDir() || parent.Mode().Perm() != 0700 {
-		return errPrivateProvider
-	}
-	socket, err := os.Lstat(c.path)
-	if err != nil || !os.SameFile(socket, c.socket) || socket.Mode()&os.ModeSocket == 0 || socket.Mode().Perm() != 0600 {
-		return errPrivateProvider
-	}
-	for _, info := range []os.FileInfo{parent, socket} {
-		owner, ok := info.Sys().(*syscall.Stat_t)
-		if !ok || owner.Uid != c.uid {
-			return errPrivateProvider
-		}
-	}
-	return nil
 }
 func (c *authorityClient) post(ctx context.Context, path string, body []byte, response any) error {
 	if ctx.Err() != nil || len(body) > 8192 {

@@ -172,6 +172,9 @@ func loadGuardedStartup(ctx context.Context, path string) (guardedStartup, []byt
 			return c, nil, errPrivateProvider
 		}
 	}
+	if _, _, err := authoritySocketSnapshot(c.AuthoritySocket, uint32(c.ServiceGID), os.Lstat); err != nil {
+		return c, nil, errPrivateProvider
+	}
 	// Scratch cleanup may remove only lease-owned media/profile directories.
 	for _, protected := range []string{path, c.KeyPath, c.AcceptancePath, c.ProviderSocket, c.AuthoritySocket} {
 		for _, root := range []string{c.MediaRoot, c.ProfileRoot} {
@@ -205,7 +208,7 @@ func runGuardedProvider(ctx context.Context, path string) error {
 	if err != nil {
 		return errPrivateProvider
 	}
-	authority, err := newAuthorityClient(c.AuthoritySocket, uint32(c.ServiceUID))
+	authority, err := newAuthorityClient(c.AuthoritySocket, uint32(c.ServiceGID))
 	if err != nil {
 		return errPrivateProvider
 	}
