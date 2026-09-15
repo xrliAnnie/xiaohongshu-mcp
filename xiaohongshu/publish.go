@@ -82,10 +82,6 @@ func (p *PublishAction) Publish(ctx context.Context, content PublishImageContent
 	}
 
 	tags := content.Tags
-	if len(tags) >= 10 {
-		logrus.Warnf("标签数量超过10，截取前10个标签")
-		tags = tags[:10]
-	}
 
 	logrus.Infof("发布内容: title=%s, images=%v, tags=%v, schedule=%v, original=%v, visibility=%s, products=%v", content.Title, len(content.ImagePaths), tags, content.ScheduleTime, content.IsOriginal, content.Visibility, content.Products)
 
@@ -621,7 +617,6 @@ func inputTags(contentElem *rod.Element, tags []string) error {
 	time.Sleep(1 * time.Second)
 
 	for _, tag := range tags {
-		tag = strings.TrimLeft(tag, "#")
 		if err := inputTag(contentElem, tag); err != nil {
 			return errors.Wrapf(err, "输入标签[%s]失败", tag)
 		}
@@ -644,26 +639,9 @@ func inputTag(contentElem *rod.Element, tag string) error {
 
 	time.Sleep(1 * time.Second)
 
-	page := contentElem.Page()
-	topicContainer, err := page.Element("#creator-editor-topic-container")
-	if err != nil || topicContainer == nil {
-		slog.Warn("未找到标签联想下拉框，直接输入空格", "tag", tag)
-		return contentElem.Input(" ")
+	if err := selectExactTopic(contentElem.Page(), tag); err != nil {
+		return err
 	}
-
-	firstItem, err := topicContainer.Element(".item")
-	if err != nil || firstItem == nil {
-		slog.Warn("未找到标签联想选项，直接输入空格", "tag", tag)
-		return contentElem.Input(" ")
-	}
-
-	if err := firstItem.Click(proto.InputMouseButtonLeft, 1); err != nil {
-		return errors.Wrap(err, "点击标签联想选项失败")
-	}
-	slog.Info("成功点击标签联想选项", "tag", tag)
-	time.Sleep(200 * time.Millisecond)
-
-	time.Sleep(500 * time.Millisecond) // 等待标签处理完成
 	return nil
 }
 
