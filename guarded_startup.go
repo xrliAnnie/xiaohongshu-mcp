@@ -151,8 +151,16 @@ func loadGuardedStartup(ctx context.Context, path string) (guardedStartup, []byt
 	if err != nil {
 		return c, nil, errPrivateProvider
 	}
+	metadataRaw, err := readGuardedFile(guardedInstallationMetadataPath, 0, 0644, 1024, 0)
+	if err != nil {
+		return c, nil, errPrivateProvider
+	}
+	metadata, err := parseGuardedInstallationMetadata(metadataRaw)
+	if err != nil {
+		return c, nil, errPrivateProvider
+	}
 	proof, err := readGuardedFile(c.AcceptancePath, 0, 0644, 4096, c.ServiceUID)
-	if err != nil || verifyGuardedBoundary(proof, publicKey, hex.EncodeToString(configHash[:]), c.ProviderBinary.SHA256, schema, c.BoundaryProbe.SHA256) != nil {
+	if err != nil || verifyGuardedBoundary(proof, publicKey, hex.EncodeToString(configHash[:]), c.ProviderBinary.SHA256, schema, c.BoundaryProbe.SHA256, metadata.ManifestSHA256, metadata.BootstrapSHA256) != nil {
 		return c, nil, errPrivateProvider
 	}
 	roots := []string{c.EpochPath, c.JournalPath, c.MediaRoot, c.ProfileRoot}

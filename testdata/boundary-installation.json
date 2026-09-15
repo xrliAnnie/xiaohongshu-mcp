@@ -1,0 +1,25 @@
+{
+  "expected": {
+    "publicKey": "uXrgxj6Ko9O1shIQkERJYbECqCBqUnkXyKf+QLrT5e0=",
+    "configDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "providerBinarySha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "toolSchemaDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "probeSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "manifestSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "bootstrapSha256": "2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "envelope": {
+    "statement": {
+      "schemaVersion": 1,
+      "configDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "providerBinarySha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "toolSchemaDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "probeSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "manifestSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "bootstrapSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "probeKind": "fixture_harness",
+      "passed": true
+    },
+    "signature": "qwwob0plu4B6dnyx8j9cSQImQVV6vLMOxKyLnSb4slxxKPVvw0oTGiSiPyxNjeRs+IUHCT0YZ4i0Pw4Lp7tNCQ=="
+  }
+}
