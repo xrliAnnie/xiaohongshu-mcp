@@ -122,3 +122,33 @@ func TestPipeProcessCancellationAndStartFailureNeverLeaveAChild(t *testing.T) {
 		t.Fatal("cancelled child survived")
 	}
 }
+
+func TestPipeProcessHonorsBoundedOwnerTimeout(t *testing.T) {
+	for _, budget := range []time.Duration{0, -time.Second, 5 * time.Minute} {
+		cmd := exec.Command("/bin/sleep", "30")
+		if _, err := startPipeProcessWithTimeout(context.Background(), cmd, budget); err == nil || cmd.Process != nil {
+			t.Fatal("invalid owner timeout started a process")
+		}
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestPipeProcessHelper$")
+	cmd.Env = []string{"XHS_TEST_PIPE_HELPER=1", "PATH=/usr/bin:/bin"}
+	process, err := startPipeProcessWithTimeout(context.Background(), cmd, 500*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer process.Close()
+	if err := process.transport.Send([]byte(`{"id":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := process.transport.Read(); err != nil {
+		t.Fatal("helper did not start before its deadline", err)
+	}
+	select {
+	case <-process.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("owner timeout did not reap its child")
+	}
+	if syscall.Kill(process.pid, 0) == nil {
+		t.Fatal("expired child still exists")
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/cdp"
@@ -101,6 +102,15 @@ func preparePipeCommand(options PipeBrowserOptions) (*exec.Cmd, string, error) {
 	return cmd, profile, nil
 }
 func LaunchPipeBrowser(ctx context.Context, options PipeBrowserOptions) (*PipeBrowser, error) {
+	return launchPipeBrowser(ctx, options, 2*time.Minute)
+}
+
+// Login has a four-minute QR owner. Write/read callers keep the ordinary budget;
+// all owners still honor an earlier caller cancellation or deadline.
+func LaunchPipeLoginBrowser(ctx context.Context, options PipeBrowserOptions) (*PipeBrowser, error) {
+	return launchPipeBrowser(ctx, options, 4*time.Minute)
+}
+func launchPipeBrowser(ctx context.Context, options PipeBrowserOptions, budget time.Duration) (*PipeBrowser, error) {
 	if ctx.Err() != nil {
 		return nil, errCDPPipe
 	}
@@ -108,18 +118,21 @@ func LaunchPipeBrowser(ctx context.Context, options PipeBrowserOptions) (*PipeBr
 	if err != nil {
 		return nil, err
 	}
-	return launchPreparedPipeBrowser(ctx, cmd, profile)
+	return launchPreparedPipeBrowserWithTimeout(ctx, cmd, profile, budget)
 }
 
 // Only LaunchPipeBrowser supplies commands in production, after policy verification.
 func launchPreparedPipeBrowser(ctx context.Context, cmd *exec.Cmd, profile string) (*PipeBrowser, error) {
+	return launchPreparedPipeBrowserWithTimeout(ctx, cmd, profile, 2*time.Minute)
+}
+func launchPreparedPipeBrowserWithTimeout(ctx context.Context, cmd *exec.Cmd, profile string, budget time.Duration) (*PipeBrowser, error) {
 	info, err := os.Lstat(profile)
 	if err != nil {
 		os.RemoveAll(profile)
 		return nil, errCDPPipe
 	}
 	lifetime, cancel := context.WithCancel(ctx)
-	process, err := startPipeProcess(lifetime, cmd)
+	process, err := startPipeProcessWithTimeout(lifetime, cmd, budget)
 	if err != nil {
 		cancel()
 		os.RemoveAll(profile)

@@ -90,7 +90,7 @@ func openControlledLogin(ctx context.Context, options browser.PipeBrowserOptions
 	if ctx.Err() != nil {
 		return nil, errPrivateProvider
 	}
-	owned, err := browser.LaunchPipeBrowser(ctx, options)
+	owned, err := browser.LaunchPipeLoginBrowser(ctx, options)
 	if owned == nil {
 		return nil, errPrivateProvider
 	}

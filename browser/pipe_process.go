@@ -22,6 +22,15 @@ type pipeProcess struct {
 // process group has been killed: the unreaped leader reserves its PID/PGID and
 // prevents a delayed cleanup from signalling a reused unrelated process group.
 func startPipeProcess(ctx context.Context, cmd *exec.Cmd) (*pipeProcess, error) {
+	return startPipeProcessWithTimeout(ctx, cmd, 2*time.Minute)
+}
+
+// Only trusted browser owners select this budget; no RPC or model field reaches it.
+func startPipeProcessWithTimeout(ctx context.Context, cmd *exec.Cmd, budget time.Duration) (*pipeProcess, error) {
+	if budget <= 0 || budget > 4*time.Minute {
+		return nil, errCDPPipe
+	}
+
 	if ctx.Err() != nil || cmd == nil || cmd.Process != nil || len(cmd.ExtraFiles) != 0 || cmd.SysProcAttr != nil {
 		return nil, errCDPPipe
 	}
@@ -59,7 +68,7 @@ func startPipeProcess(ctx context.Context, cmd *exec.Cmd) (*pipeProcess, error) 
 	}
 	p := &pipeProcess{transport: newPipeTransport(responsesR, commandsW), command: cmd, pid: cmd.Process.Pid, stop: make(chan struct{}), done: make(chan struct{})}
 	p.transport.onClose = p.requestStop
-	lifetime, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	lifetime, cancel := context.WithTimeout(ctx, budget)
 	go func() {
 		select {
 		case <-lifetime.Done():
