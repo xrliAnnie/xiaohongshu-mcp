@@ -1,0 +1,24 @@
+{
+  "keyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "now": 1000000,
+  "leaseExpiresAt": 1050000,
+  "approvalExpiresAt": 1040000,
+  "permit": {
+    "purpose": "flywheel:xhs-dispatch:v1",
+    "issuer": "xhs-authority",
+    "audience": "provider-a",
+    "proposalId": "proposal-a",
+    "receiptId": "receipt-a",
+    "attemptId": "attempt-a",
+    "contentDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "accountUserId": "用户🌱 <&>",
+    "accountEpoch": 3,
+    "providerGeneration": "generation-a",
+    "leaseId": "lease-a",
+    "issuedAt": 1000000,
+    "expiresAt": 1040000,
+    "keyId": "key-v1"
+  },
+  "canonical": "{\"accountEpoch\":3,\"accountUserId\":\"用户🌱 <&>\",\"attemptId\":\"attempt-a\",\"audience\":\"provider-a\",\"contentDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"expiresAt\":1040000,\"issuedAt\":1000000,\"issuer\":\"xhs-authority\",\"keyId\":\"key-v1\",\"leaseId\":\"lease-a\",\"proposalId\":\"proposal-a\",\"providerGeneration\":\"generation-a\",\"purpose\":\"flywheel:xhs-dispatch:v1\",\"receiptId\":\"receipt-a\"}",
+  "signature": "8b2e779d347f599dd9400c234c73e86108be2ea81b00cb5542843c47f0204160"
+}
