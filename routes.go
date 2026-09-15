@@ -15,6 +15,7 @@ func setupRoutes(appServer *AppServer) *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
+	router.Use(publicWriteGuard())
 
 	// 添加中间件
 	router.Use(errorHandlingMiddleware())
