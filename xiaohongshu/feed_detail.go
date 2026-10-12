@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -79,29 +80,39 @@ func (f *FeedDetailAction) GetFeedDetail(ctx context.Context, feedID, xsecToken 
 
 func (f *FeedDetailAction) GetFeedDetailWithConfig(ctx context.Context, feedID, xsecToken string, loadAllComments bool, config CommentLoadConfig) (*FeedDetailResponse, error) {
 	page := f.page.Context(ctx).Timeout(10 * time.Minute)
-	url := makeFeedDetailURL(feedID, xsecToken)
-
-	logrus.Infof("打开 feed 详情页: %s", url)
 	logrus.Infof("配置: 点击更多=%v, 回复阈值=%d, 最大评论数=%d, 滚动速度=%s",
 		config.ClickMoreReplies, config.MaxRepliesThreshold, config.MaxCommentItems, config.ScrollSpeed)
 
-	// 使用retry-go处理页面导航和DOM稳定等待
-	err := retry.Do(
-		func() error {
-			page.MustNavigate(url)
-			page.MustWaitDOMStable()
-			return nil
-		},
-		retry.Attempts(3),
-		retry.Delay(500*time.Millisecond),
-		retry.MaxJitter(1000*time.Millisecond),
-		retry.OnRetry(func(n uint, err error) {
-			logrus.Debugf("页面导航重试 #%d: %v", n, err)
-		}),
-	)
-	if err != nil {
-		logrus.Errorf("页面导航失败: %v", err)
-		return nil, err
+	if configs.IsRednote() {
+		// Rednote 整页打开详情会被重定向到旧前端，改走前端路由
+		if err := openDetailInApp(page, configs.BaseURL(), feedID, xsecToken); err != nil {
+			if accessErr := checkPageAccessible(page); accessErr != nil {
+				return nil, accessErr
+			}
+			logrus.Errorf("打开详情失败: %v", err)
+			return nil, err
+		}
+	} else {
+		url := makeFeedDetailURL(feedID, xsecToken)
+		logrus.Infof("打开 feed 详情页: %s", url)
+		// 使用retry-go处理页面导航和DOM稳定等待
+		err := retry.Do(
+			func() error {
+				page.MustNavigate(url)
+				page.MustWaitDOMStable()
+				return nil
+			},
+			retry.Attempts(3),
+			retry.Delay(500*time.Millisecond),
+			retry.MaxJitter(1000*time.Millisecond),
+			retry.OnRetry(func(n uint, err error) {
+				logrus.Debugf("页面导航重试 #%d: %v", n, err)
+			}),
+		)
+		if err != nil {
+			logrus.Errorf("页面导航失败: %v", err)
+			return nil, err
+		}
 	}
 	sleepRandom(1000, 1000)
 
@@ -861,6 +872,78 @@ func (f *FeedDetailAction) extractFeedDetail(page *rod.Page, feedID string) (*Fe
 		Note:     noteDetail.Note,
 		Comments: noteDetail.Comments,
 	}, nil
+}
+
+// ========== Rednote 前端路由打开详情 ==========
+
+// 等待时长（测试可调）
+var (
+	appReadyTimeout    = 15 * time.Second
+	detailReadyTimeout = 20 * time.Second
+)
+
+var feedIDPattern = regexp.MustCompile(`^[0-9a-zA-Z]+$`)
+
+// rednoteDetailPath 生成新版前端的详情路由（相对路径）
+func rednoteDetailPath(feedID, xsecToken string) (string, error) {
+	if !feedIDPattern.MatchString(feedID) {
+		return "", fmt.Errorf("非法 feed ID: %q", feedID)
+	}
+	return "/discovery/item/" + feedID + "?xsec_token=" + url.QueryEscape(xsecToken) + "&xsec_source=pc_feed", nil
+}
+
+// redactURL 去掉 query（含 xsec_token），用于错误信息
+func redactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" {
+		return "<unparseable>"
+	}
+	return u.Scheme + "://" + u.Host + u.Path
+}
+
+// openDetailInApp 先整页打开首页，再用前端路由进入详情，并等待 noteDetailMap 写入该笔记。
+// 整页加载详情 URL 会被服务器重定向到没有 __INITIAL_STATE__ 的旧前端，只能走前端路由（需 JS）。
+func openDetailInApp(page *rod.Page, baseURL, feedID, xsecToken string) error {
+	path, err := rednoteDetailPath(feedID, xsecToken)
+	if err != nil {
+		return err
+	}
+	if err := page.Navigate(baseURL + "/"); err != nil {
+		return fmt.Errorf("打开首页失败: %w", err)
+	}
+	// 等 Vue router 挂载；等不到也继续，下面退回 pushState
+	if err := page.Timeout(appReadyTimeout).Wait(rod.Eval(`() => !!document.querySelector('#app')?.__vue_app__?.config?.globalProperties?.$router`)); err != nil {
+		logrus.Warnf("未等到 Vue router(%s)，退回 pushState: %v", currentURL(page), err)
+	}
+
+	how, err := page.Eval(`(p) => {
+		const r = document.querySelector('#app')?.__vue_app__?.config?.globalProperties?.$router;
+		if (r) { r.push(p); return 'router'; }
+		history.pushState(history.state, '', p);
+		dispatchEvent(new PopStateEvent('popstate', {state: history.state}));
+		return 'pushState';
+	}`, path)
+	if err != nil {
+		return fmt.Errorf("前端路由跳转失败(%s): %w", currentURL(page), err)
+	}
+	logrus.Infof("前端路由进入详情(%s): %s", how.Value.String(), redactURL(baseURL+path))
+
+	if err := page.Timeout(detailReadyTimeout).Wait(rod.Eval(`(id) => {
+		const m = window.__INITIAL_STATE__?.note?.noteDetailMap;
+		return !!(m && m[id] && m[id].note && m[id].note.noteId === id);
+	}`, feedID)); err != nil {
+		return fmt.Errorf("详情数据未出现(当前页 %s): %w", currentURL(page), err)
+	}
+	return nil
+}
+
+// currentURL 返回当前页（脱敏），用于诊断
+func currentURL(page *rod.Page) string {
+	info, err := page.Info()
+	if err != nil {
+		return "<unknown>"
+	}
+	return redactURL(info.URL)
 }
 
 func makeFeedDetailURL(feedID, xsecToken string) string {
