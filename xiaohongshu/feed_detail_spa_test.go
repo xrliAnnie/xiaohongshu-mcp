@@ -32,6 +32,13 @@ func TestRedactURL(t *testing.T) {
 	require.Equal(t, "<unparseable>", redactURL("://bad"))
 }
 
+func TestScrubToken(t *testing.T) {
+	err := scrubToken(fmt.Errorf("push /discovery/item/1?xsec_token=CBCO%%2Ba%%3D failed, raw CBCO+a="), "CBCO+a=")
+	require.EqualError(t, err, "push /discovery/item/1?xsec_token=<redacted> failed, raw <redacted>")
+	require.Nil(t, scrubToken(nil, "x"))
+	require.EqualError(t, scrubToken(fmt.Errorf("boom"), ""), "boom")
+}
+
 // fakeSPA 模拟 Rednote 新版前端：整页打开详情路由会被重定向到旧前端，
 // 只有前端路由（router.push / pushState+popstate）进入详情才会写入 noteDetailMap。
 const fakeSPA = `<!doctype html><html><body><div id="app"></div><script>

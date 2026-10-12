@@ -924,7 +924,7 @@ func openDetailInApp(page *rod.Page, baseURL, feedID, xsecToken string) error {
 		return 'pushState';
 	}`, path)
 	if err != nil {
-		return fmt.Errorf("前端路由跳转失败(%s): %w", currentURL(page), err)
+		return fmt.Errorf("前端路由跳转失败(%s): %w", currentURL(page), scrubToken(err, xsecToken))
 	}
 	logrus.Infof("前端路由进入详情(%s): %s", how.Value.String(), redactURL(baseURL+path))
 
@@ -935,6 +935,16 @@ func openDetailInApp(page *rod.Page, baseURL, feedID, xsecToken string) error {
 		return fmt.Errorf("详情数据未出现(当前页 %s): %w", currentURL(page), err)
 	}
 	return nil
+}
+
+// scrubToken 去掉错误文本里的 token（原文与 URL 编码两种形式）
+func scrubToken(err error, token string) error {
+	if err == nil || token == "" {
+		return err
+	}
+	msg := strings.ReplaceAll(err.Error(), token, "<redacted>")
+	msg = strings.ReplaceAll(msg, url.QueryEscape(token), "<redacted>")
+	return fmt.Errorf("%s", msg)
 }
 
 // currentURL 返回当前页（脱敏），用于诊断
