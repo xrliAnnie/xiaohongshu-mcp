@@ -1,0 +1,38 @@
+[
+	{
+		"operation": "publish_content",
+		"now": 1789416000000,
+		"canonical": "{\"account\":{\"accountEpoch\":1,\"accountUserId\":\"account-a\",\"providerGeneration\":\"generation-a\",\"providerInstanceId\":\"provider-a\"},\"authorityPolicyVersion\":1,\"leadId\":\"lead-a\",\"media\":[{\"artifactId\":\"artifact-a\",\"mimeType\":\"image/png\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"sizeBytes\":100}],\"operationId\":\"xiaohongshu.publish_content\",\"payload\":{\"content\":\" 精确\\r\\n文字 é \",\"isOriginal\":false,\"scheduleAt\":null,\"tags\":[],\"title\":\"标题🙂\",\"unfavorite\":null,\"unlike\":null,\"visibility\":\"公开可见\"},\"projectId\":\"flywheel\",\"proposalId\":\"d95c13f3-0057-4ae7-a654-456eef4ee882\",\"purpose\":\"xiaohongshu_founder_write\",\"requesterUid\":501,\"schemaVersion\":1,\"target\":null,\"upstream\":{\"binarySha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"guardProtocol\":1,\"toolSchemaDigest\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}}",
+		"digest": "d37c119025bf45f5ff1e22e4da98b82a53debb5b185defb409296c7411f9341f"
+	},
+	{
+		"operation": "publish_with_video",
+		"now": 1789416000000,
+		"canonical": "{\"account\":{\"accountEpoch\":1,\"accountUserId\":\"account-a\",\"providerGeneration\":\"generation-a\",\"providerInstanceId\":\"provider-a\"},\"authorityPolicyVersion\":1,\"leadId\":\"lead-a\",\"media\":[{\"artifactId\":\"artifact-a\",\"mimeType\":\"video/mp4\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"sizeBytes\":100}],\"operationId\":\"xiaohongshu.publish_with_video\",\"payload\":{\"content\":\" 精确\\r\\n文字 é \",\"isOriginal\":false,\"scheduleAt\":null,\"tags\":[],\"title\":\"标题🙂\",\"unfavorite\":null,\"unlike\":null,\"visibility\":\"公开可见\"},\"projectId\":\"flywheel\",\"proposalId\":\"d95c13f3-0057-4ae7-a654-456eef4ee882\",\"purpose\":\"xiaohongshu_founder_write\",\"requesterUid\":501,\"schemaVersion\":1,\"target\":null,\"upstream\":{\"binarySha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"guardProtocol\":1,\"toolSchemaDigest\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}}",
+		"digest": "f3540e01f6a0059c88d2f48cd13238bdec26239cea7ec72b095cdce6d0cb0b9c"
+	},
+	{
+		"operation": "post_comment_to_feed",
+		"now": 1789416000000,
+		"canonical": "{\"account\":{\"accountEpoch\":1,\"accountUserId\":\"account-a\",\"providerGeneration\":\"generation-a\",\"providerInstanceId\":\"provider-a\"},\"authorityPolicyVersion\":1,\"leadId\":\"lead-a\",\"media\":[],\"operationId\":\"xiaohongshu.post_comment_to_feed\",\"payload\":{\"content\":\"回复\",\"isOriginal\":null,\"scheduleAt\":null,\"tags\":[],\"title\":null,\"unfavorite\":null,\"unlike\":null,\"visibility\":null},\"projectId\":\"flywheel\",\"proposalId\":\"d95c13f3-0057-4ae7-a654-456eef4ee882\",\"purpose\":\"xiaohongshu_founder_write\",\"requesterUid\":501,\"schemaVersion\":1,\"target\":{\"commentId\":null,\"feedId\":\"feed-a\",\"userId\":null},\"upstream\":{\"binarySha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"guardProtocol\":1,\"toolSchemaDigest\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}}",
+		"digest": "36d98cf15da2b6501ee522e4dc87d65435662d5c05def2a51748aa7a0a059454"
+	},
+	{
+		"operation": "reply_comment_in_feed",
+		"now": 1789416000000,
+		"canonical": "{\"account\":{\"accountEpoch\":1,\"accountUserId\":\"account-a\",\"providerGeneration\":\"generation-a\",\"providerInstanceId\":\"provider-a\"},\"authorityPolicyVersion\":1,\"leadId\":\"lead-a\",\"media\":[],\"operationId\":\"xiaohongshu.reply_comment_in_feed\",\"payload\":{\"content\":\"回复\",\"isOriginal\":null,\"scheduleAt\":null,\"tags\":[],\"title\":null,\"unfavorite\":null,\"unlike\":null,\"visibility\":null},\"projectId\":\"flywheel\",\"proposalId\":\"d95c13f3-0057-4ae7-a654-456eef4ee882\",\"purpose\":\"xiaohongshu_founder_write\",\"requesterUid\":501,\"schemaVersion\":1,\"target\":{\"commentId\":\"comment-a\",\"feedId\":\"feed-a\",\"userId\":null},\"upstream\":{\"binarySha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"guardProtocol\":1,\"toolSchemaDigest\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}}",
+		"digest": "1f0e8b35a93155a012b3b0473a2c02569e8b2a46ffcf54ecdbeffdee988d98d0"
+	},
+	{
+		"operation": "like_feed",
+		"now": 1789416000000,
+		"canonical": "{\"account\":{\"accountEpoch\":1,\"accountUserId\":\"account-a\",\"providerGeneration\":\"generation-a\",\"providerInstanceId\":\"provider-a\"},\"authorityPolicyVersion\":1,\"leadId\":\"lead-a\",\"media\":[],\"operationId\":\"xiaohongshu.like_feed\",\"payload\":{\"content\":null,\"isOriginal\":null,\"scheduleAt\":null,\"tags\":[],\"title\":null,\"unfavorite\":null,\"unlike\":false,\"visibility\":null},\"projectId\":\"flywheel\",\"proposalId\":\"d95c13f3-0057-4ae7-a654-456eef4ee882\",\"purpose\":\"xiaohongshu_founder_write\",\"requesterUid\":501,\"schemaVersion\":1,\"target\":{\"commentId\":null,\"feedId\":\"feed-a\",\"userId\":null},\"upstream\":{\"binarySha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"guardProtocol\":1,\"toolSchemaDigest\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}}",
+		"digest": "441a3a226a89550ed260fa176031b563ccf977cc9679cc0eaf69c5d345ffa83a"
+	},
+	{
+		"operation": "favorite_feed",
+		"now": 1789416000000,
+		"canonical": "{\"account\":{\"accountEpoch\":1,\"accountUserId\":\"account-a\",\"providerGeneration\":\"generation-a\",\"providerInstanceId\":\"provider-a\"},\"authorityPolicyVersion\":1,\"leadId\":\"lead-a\",\"media\":[],\"operationId\":\"xiaohongshu.favorite_feed\",\"payload\":{\"content\":null,\"isOriginal\":null,\"scheduleAt\":null,\"tags\":[],\"title\":null,\"unfavorite\":false,\"unlike\":null,\"visibility\":null},\"projectId\":\"flywheel\",\"proposalId\":\"d95c13f3-0057-4ae7-a654-456eef4ee882\",\"purpose\":\"xiaohongshu_founder_write\",\"requesterUid\":501,\"schemaVersion\":1,\"target\":{\"commentId\":null,\"feedId\":\"feed-a\",\"userId\":null},\"upstream\":{\"binarySha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"guardProtocol\":1,\"toolSchemaDigest\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}}",
+		"digest": "3dcfca8205fc22d8c105231c3e38c6380ea2e8f5b381bc2e126c8178fdd49314"
+	}
+]

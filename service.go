@@ -3,8 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"os"
+	"errors"
 	"sync"
 	"time"
 
@@ -15,9 +14,10 @@ import (
 	"github.com/xpzouying/xiaohongshu-mcp/configs"
 	"github.com/xpzouying/xiaohongshu-mcp/cookies"
 	"github.com/xpzouying/xiaohongshu-mcp/pkg/downloader"
-	"github.com/xpzouying/xiaohongshu-mcp/pkg/xhsutil"
 	"github.com/xpzouying/xiaohongshu-mcp/xiaohongshu"
 )
+
+var errLegacyWriteGate = errors.New("founder_write_gate_absent")
 
 // XiaohongshuService 小红书业务服务
 type XiaohongshuService struct{}
@@ -234,72 +234,8 @@ func runWithPanicSafeCleanup(cleanup, work func()) {
 
 // PublishContent 发布内容
 func (s *XiaohongshuService) PublishContent(ctx context.Context, req *PublishRequest) (*PublishResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, publishContentTimeout)
-	defer cancel()
-
-	// 验证标题长度（小红书限制：最大20个字）
-	if xhsutil.CalcTitleLength(req.Title) > 20 {
-		return nil, fmt.Errorf("标题长度超过限制")
-	}
-
-	// 处理图片：下载URL图片或使用本地路径
-	imagePaths, err := s.processImages(req.Images)
-	if err != nil {
-		return nil, err
-	}
-
-	// 解析定时发布时间
-	var scheduleTime *time.Time
-	if req.ScheduleAt != "" {
-		t, err := time.Parse(time.RFC3339, req.ScheduleAt)
-		if err != nil {
-			return nil, fmt.Errorf("定时发布时间格式错误，请使用 ISO8601 格式: %v", err)
-		}
-
-		// 校验定时发布时间范围：1小时至14天
-		now := time.Now()
-		minTime := now.Add(1 * time.Hour)
-		maxTime := now.Add(14 * 24 * time.Hour)
-
-		if t.Before(minTime) {
-			return nil, fmt.Errorf("定时发布时间必须至少在1小时后，当前设置: %s，最早可选: %s",
-				t.Format("2006-01-02 15:04"), minTime.Format("2006-01-02 15:04"))
-		}
-		if t.After(maxTime) {
-			return nil, fmt.Errorf("定时发布时间不能超过14天，当前设置: %s，最晚可选: %s",
-				t.Format("2006-01-02 15:04"), maxTime.Format("2006-01-02 15:04"))
-		}
-
-		scheduleTime = &t
-		logrus.Infof("设置定时发布时间: %s", t.Format("2006-01-02 15:04"))
-	}
-
-	// 构建发布内容
-	content := xiaohongshu.PublishImageContent{
-		Title:        req.Title,
-		Content:      req.Content,
-		Tags:         req.Tags,
-		ImagePaths:   imagePaths,
-		ScheduleTime: scheduleTime,
-		IsOriginal:   req.IsOriginal,
-		Visibility:   req.Visibility,
-		Products:     req.Products,
-	}
-
-	// 执行发布
-	if err := s.publishContent(ctx, content); err != nil {
-		logrus.Errorf("发布内容失败: title=%s %v", content.Title, err)
-		return nil, err
-	}
-
-	response := &PublishResponse{
-		Title:   req.Title,
-		Content: req.Content,
-		Images:  len(imagePaths),
-		Status:  "发布完成",
-	}
-
-	return response, nil
+	// Legacy entrypoints have no verified context; only the private provider may write.
+	return nil, errLegacyWriteGate
 }
 
 // processImages 处理图片列表，支持URL下载和本地路径
@@ -310,104 +246,20 @@ func (s *XiaohongshuService) processImages(images []string) ([]string, error) {
 
 // publishContent 执行内容发布
 func (s *XiaohongshuService) publishContent(ctx context.Context, content xiaohongshu.PublishImageContent) error {
-	b := newBrowser()
-	defer b.Close()
-
-	page := b.NewPage()
-	defer page.Close()
-
-	action, err := xiaohongshu.NewPublishImageAction(page)
-	if err != nil {
-		return err
-	}
-
-	// 执行发布
-	return action.Publish(ctx, content)
+	// Legacy entrypoints have no verified context; only the private provider may write.
+	return errLegacyWriteGate
 }
 
 // PublishVideo 发布视频（本地文件）
 func (s *XiaohongshuService) PublishVideo(ctx context.Context, req *PublishVideoRequest) (*PublishVideoResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, publishVideoTimeout)
-	defer cancel()
-
-	// 标题长度校验（小红书限制：最大20个字）
-	if xhsutil.CalcTitleLength(req.Title) > 20 {
-		return nil, fmt.Errorf("标题长度超过限制")
-	}
-
-	// 本地视频文件校验
-	if req.Video == "" {
-		return nil, fmt.Errorf("必须提供本地视频文件")
-	}
-	if _, err := os.Stat(req.Video); err != nil {
-		return nil, fmt.Errorf("视频文件不存在或不可访问: %v", err)
-	}
-
-	// 解析定时发布时间
-	var scheduleTime *time.Time
-	if req.ScheduleAt != "" {
-		t, err := time.Parse(time.RFC3339, req.ScheduleAt)
-		if err != nil {
-			return nil, fmt.Errorf("定时发布时间格式错误，请使用 ISO8601 格式: %v", err)
-		}
-
-		// 校验定时发布时间范围：1小时至14天
-		now := time.Now()
-		minTime := now.Add(1 * time.Hour)
-		maxTime := now.Add(14 * 24 * time.Hour)
-
-		if t.Before(minTime) {
-			return nil, fmt.Errorf("定时发布时间必须至少在1小时后，当前设置: %s，最早可选: %s",
-				t.Format("2006-01-02 15:04"), minTime.Format("2006-01-02 15:04"))
-		}
-		if t.After(maxTime) {
-			return nil, fmt.Errorf("定时发布时间不能超过14天，当前设置: %s，最晚可选: %s",
-				t.Format("2006-01-02 15:04"), maxTime.Format("2006-01-02 15:04"))
-		}
-
-		scheduleTime = &t
-		logrus.Infof("设置定时发布时间: %s", t.Format("2006-01-02 15:04"))
-	}
-
-	// 构建发布内容
-	content := xiaohongshu.PublishVideoContent{
-		Title:        req.Title,
-		Content:      req.Content,
-		Tags:         req.Tags,
-		VideoPath:    req.Video,
-		ScheduleTime: scheduleTime,
-		Visibility:   req.Visibility,
-		Products:     req.Products,
-	}
-
-	// 执行发布
-	if err := s.publishVideo(ctx, content); err != nil {
-		return nil, err
-	}
-
-	resp := &PublishVideoResponse{
-		Title:   req.Title,
-		Content: req.Content,
-		Video:   req.Video,
-		Status:  "发布完成",
-	}
-	return resp, nil
+	// Legacy entrypoints have no verified context; only the private provider may write.
+	return nil, errLegacyWriteGate
 }
 
 // publishVideo 执行视频发布
 func (s *XiaohongshuService) publishVideo(ctx context.Context, content xiaohongshu.PublishVideoContent) error {
-	b := newBrowser()
-	defer b.Close()
-
-	page := b.NewPage()
-	defer page.Close()
-
-	action, err := xiaohongshu.NewPublishVideoAction(page)
-	if err != nil {
-		return err
-	}
-
-	return action.PublishVideo(ctx, content)
+	// Legacy entrypoints have no verified context; only the private provider may write.
+	return errLegacyWriteGate
 }
 
 // ListFeeds 获取Feeds列表
@@ -526,120 +378,38 @@ func (s *XiaohongshuService) UserProfile(ctx context.Context, userID, xsecToken 
 
 // PostCommentToFeed 发表评论到Feed
 func (s *XiaohongshuService) PostCommentToFeed(ctx context.Context, feedID, xsecToken, content string) (*PostCommentResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, feedDetailTimeout)
-	defer cancel()
-
-	b := newBrowser()
-	defer b.Close()
-
-	page := b.NewPage()
-	defer page.Close()
-
-	action := xiaohongshu.NewCommentFeedAction(page)
-
-	if err := action.PostComment(ctx, feedID, xsecToken, content); err != nil {
-		return nil, err
-	}
-
-	return &PostCommentResponse{FeedID: feedID, Success: true, Message: "评论发表成功"}, nil
+	// Legacy entrypoints have no verified context; only the private provider may write.
+	return nil, errLegacyWriteGate
 }
 
 // LikeFeed 点赞笔记
 func (s *XiaohongshuService) LikeFeed(ctx context.Context, feedID, xsecToken string) (*ActionResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, shortBrowserOperationTimeout)
-	defer cancel()
-
-	b := newBrowser()
-	defer b.Close()
-
-	page := b.NewPage()
-	defer page.Close()
-
-	action := xiaohongshu.NewLikeAction(page)
-	if err := action.Like(ctx, feedID, xsecToken); err != nil {
-		return nil, err
-	}
-	return &ActionResult{FeedID: feedID, Success: true, Message: "点赞成功或已点赞"}, nil
+	// Legacy entrypoints have no verified context; only the private provider may write.
+	return nil, errLegacyWriteGate
 }
 
 // UnlikeFeed 取消点赞笔记
 func (s *XiaohongshuService) UnlikeFeed(ctx context.Context, feedID, xsecToken string) (*ActionResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, shortBrowserOperationTimeout)
-	defer cancel()
-
-	b := newBrowser()
-	defer b.Close()
-
-	page := b.NewPage()
-	defer page.Close()
-
-	action := xiaohongshu.NewLikeAction(page)
-	if err := action.Unlike(ctx, feedID, xsecToken); err != nil {
-		return nil, err
-	}
-	return &ActionResult{FeedID: feedID, Success: true, Message: "取消点赞成功或未点赞"}, nil
+	// Legacy entrypoints have no verified context; only the private provider may write.
+	return nil, errLegacyWriteGate
 }
 
 // FavoriteFeed 收藏笔记
 func (s *XiaohongshuService) FavoriteFeed(ctx context.Context, feedID, xsecToken string) (*ActionResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, shortBrowserOperationTimeout)
-	defer cancel()
-
-	b := newBrowser()
-	defer b.Close()
-
-	page := b.NewPage()
-	defer page.Close()
-
-	action := xiaohongshu.NewFavoriteAction(page)
-	if err := action.Favorite(ctx, feedID, xsecToken); err != nil {
-		return nil, err
-	}
-	return &ActionResult{FeedID: feedID, Success: true, Message: "收藏成功或已收藏"}, nil
+	// Legacy entrypoints have no verified context; only the private provider may write.
+	return nil, errLegacyWriteGate
 }
 
 // UnfavoriteFeed 取消收藏笔记
 func (s *XiaohongshuService) UnfavoriteFeed(ctx context.Context, feedID, xsecToken string) (*ActionResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, shortBrowserOperationTimeout)
-	defer cancel()
-
-	b := newBrowser()
-	defer b.Close()
-
-	page := b.NewPage()
-	defer page.Close()
-
-	action := xiaohongshu.NewFavoriteAction(page)
-	if err := action.Unfavorite(ctx, feedID, xsecToken); err != nil {
-		return nil, err
-	}
-	return &ActionResult{FeedID: feedID, Success: true, Message: "取消收藏成功或未收藏"}, nil
+	// Legacy entrypoints have no verified context; only the private provider may write.
+	return nil, errLegacyWriteGate
 }
 
 // ReplyCommentToFeed 回复指定评论
 func (s *XiaohongshuService) ReplyCommentToFeed(ctx context.Context, feedID, xsecToken, commentID, userID, content string) (*ReplyCommentResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, feedDetailTimeout)
-	defer cancel()
-
-	b := newBrowser()
-	defer b.Close()
-
-	page := b.NewPage()
-	defer page.Close()
-
-	action := xiaohongshu.NewCommentFeedAction(page)
-
-	if err := action.ReplyToComment(ctx, feedID, xsecToken, commentID, userID, content); err != nil {
-		return nil, err
-	}
-
-	return &ReplyCommentResponse{
-		FeedID:          feedID,
-		TargetCommentID: commentID,
-		TargetUserID:    userID,
-		Success:         true,
-		Message:         "评论回复成功",
-	}, nil
+	// Legacy entrypoints have no verified context; only the private provider may write.
+	return nil, errLegacyWriteGate
 }
 
 func newBrowser() *headless_browser.Browser {
