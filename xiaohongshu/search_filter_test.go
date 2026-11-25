@@ -315,6 +315,16 @@ func TestWaitFilterApplied(t *testing.T) {
 		require.Error(t, waitFilterApplied(page, 2, 1, 1*time.Second))
 	})
 
+	t.Run("页面读取一直失败：错误里带上最后一次浏览器读取错误", func(t *testing.T) {
+		page, cleanup := newSearchStatePage(t, "stuck")
+		defer cleanup()
+
+		require.NoError(t, page.Close())
+		err := waitFilterApplied(page, 2, 1, 2*time.Second)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "最后一次读取页面状态的错误")
+	})
+
 	t.Run("调用方取消后立刻返回", func(t *testing.T) {
 		page, cleanup := newSearchStatePage(t, "stuck")
 		defer cleanup()

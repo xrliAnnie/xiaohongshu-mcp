@@ -187,7 +187,7 @@ const effectiveOpacityJS = `() => {
 }`
 
 // optionVisible 判断筛选选项节点是不是真实可见的那一个：
-// rod 的 Visible 排除 display:none / visibility:hidden / 零尺寸，再加上有效不透明度。
+// rod 的 Visible 排除 display:none / visibility:hidden，并要求 getBoundingClientRect 不是全零，再加上有效不透明度。
 // 读不到状态就返回错误，由调用方上报，不能默认当作可见（那样会失去排除诱饵的依据）。
 func optionVisible(opt *rod.Element) (bool, error) {
 	visible, err := opt.Visible()
@@ -226,12 +226,20 @@ const filterAppliedJS = `(group, option) => {
 // 调用方取消时立刻返回。页面里读不到这些状态字段时同样超时报错，不会当成成功。
 func waitFilterApplied(page *rod.Page, group, option int, timeout time.Duration) error {
 	wp := page.Timeout(timeout)
+	var readErr error
 	for {
-		if res, err := wp.Eval(filterAppliedJS, group, option); err == nil && res.Value.Bool() {
+		res, err := wp.Eval(filterAppliedJS, group, option)
+		if err == nil && res.Value.Bool() {
 			return nil
 		}
+		readErr = err
 		select {
 		case <-wp.GetContext().Done():
+			if readErr != nil {
+				// 页面已关闭或调试连接断开时，原始的浏览器错误比「超时」更有用，不能丢。
+				return fmt.Errorf("%s 内页面没有进入「该项已选中且结果加载完成」的状态: %w（最后一次读取页面状态的错误: %w）",
+					timeout, wp.GetContext().Err(), readErr)
+			}
 			return fmt.Errorf("%s 内页面没有进入「该项已选中且结果加载完成」的状态: %w", timeout, wp.GetContext().Err())
 		case <-time.After(150 * time.Millisecond):
 		}
