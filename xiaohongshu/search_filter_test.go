@@ -32,8 +32,8 @@ func TestCollectFilters(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.Equal(t, []pendingFilter{
-			{group: "排序依据", option: "最多收藏"},
-			{group: "发布时间", option: "一天内"},
+			{group: "排序依据", option: "最多收藏", groupIdx: 0, optionIdx: 4},
+			{group: "发布时间", option: "一天内", groupIdx: 2, optionIdx: 1},
 		}, pending)
 	})
 
@@ -170,6 +170,24 @@ func TestFindFilterOptionSkipsHoneypot(t *testing.T) {
 		require.ErrorContains(t, err, "最多收藏", "应列出页面上实际有的选项")
 	})
 
+	t.Run("前面有没有标签的无关组：跳过它，继续找目标组", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			unlabeled := `<div class="filters"><div class="tag-container"><div class="tags"><span>别的</span></div></div></div>`
+			fmt.Fprintf(w, fakeFilterPanel, unlabeled+fakeGroup("排序依据", []string{"综合", "最新"}, "综合", true))
+		}))
+		defer srv.Close()
+		b := browser.NewBrowser(true)
+		defer b.Close()
+		page := b.NewPage()
+		defer page.Close()
+		page.MustNavigate(srv.URL).MustWaitLoad()
+
+		opt, err := findFilterOption(page, pendingFilter{group: "排序依据", option: "最新"})
+		require.NoError(t, err)
+		require.Equal(t, "最新", strings.TrimSpace(opt.MustText()))
+	})
+
 	t.Run("display:none 的节点即使不透明度为 1 也不可见", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -207,20 +225,31 @@ func TestFindFilterOptionSkipsHoneypot(t *testing.T) {
 	})
 }
 
-const fakeFeedsPage = `<!doctype html><html><body><script>
-window.__INITIAL_STATE__ = {search: {feeds: {value: [{id: "a"}, {id: "b"}]}}};
-window.change = () => {
-  window.__INITIAL_STATE__.search.feeds.value = [];
-  setTimeout(() => { window.__INITIAL_STATE__.search.feeds.value = [{id: "c"}, {id: "d"}]; }, 600);
+// fakeSearchState 复刻页面自己记录的筛选状态：点击时 activeFilters 与 state 同时变化（loading 且 feeds 清空），
+// 请求完成后 state 回到 success。mode：normal 正常完成；stuck 永远 loading；wrong 完成但选中了别的选项。
+const fakeSearchState = `<!doctype html><html><body><script>
+const mode = %q;
+const search = {
+  activeFilters: {_value: [0, 0, 0, 0, 0]},
+  state: {value: "success"},
+  feeds: {value: [{id: "a"}, {id: "b"}]},
+};
+window.__INITIAL_STATE__ = {search};
+window.pick = (group, option) => {
+  search.activeFilters._value[group] = mode === "wrong" ? (option + 1) %% 5 : option;
+  search.state.value = "loading";
+  search.feeds.value = [];
+  if (mode === "stuck") return;
+  setTimeout(() => { search.feeds.value = [{id: "c"}, {id: "d"}]; search.state.value = "success"; }, 600);
 };
 </script></body></html>`
 
-func newFeedsPage(t *testing.T) (*rod.Page, func()) {
+func newSearchStatePage(t *testing.T, mode string) (*rod.Page, func()) {
 	t.Helper()
 	t.Setenv("COOKIES_PATH", filepath.Join(t.TempDir(), "cookies.json"))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, fakeFeedsPage)
+		fmt.Fprintf(w, fakeSearchState, mode)
 	}))
 	b := browser.NewBrowser(true)
 	page := b.NewPage()
@@ -232,33 +261,62 @@ func newFeedsPage(t *testing.T) (*rod.Page, func()) {
 	}
 }
 
-func TestWaitFeedsChanged(t *testing.T) {
+func TestWaitFilterApplied(t *testing.T) {
 	if os.Getenv("XHS_BROWSER_TESTS") == "" {
 		t.Skip("set XHS_BROWSER_TESTS=1 to run local-fixture browser tests (headless Chrome)")
 	}
 
-	t.Run("等到新数据灌入，而不是读到清空的中间态", func(t *testing.T) {
-		page, cleanup := newFeedsPage(t)
+	t.Run("等到该项已选中且结果加载完成，不在 loading 中途返回", func(t *testing.T) {
+		page, cleanup := newSearchStatePage(t, "normal")
 		defer cleanup()
 
-		before := readFeedIDs(page)
-		require.Equal(t, "a,b", before)
-		page.MustEval(`() => window.change()`)
-		require.True(t, waitFeedsChanged(page, before, 10*time.Second))
-		require.Equal(t, "c,d", readFeedIDs(page))
+		page.MustEval(`() => window.pick(2, 1)`)
+		require.NoError(t, waitFilterApplied(page, 2, 1, 10*time.Second))
+		require.Equal(t, "success", page.MustEval(`() => window.__INITIAL_STATE__.search.state.value`).String())
+		require.Equal(t, 2, page.MustEval(`() => window.__INITIAL_STATE__.search.feeds.value.length`).Int())
 	})
 
-	t.Run("结果一直不变：到上限就返回 false", func(t *testing.T) {
-		page, cleanup := newFeedsPage(t)
+	t.Run("连点两项：只认本项，上一项选中的状态不算", func(t *testing.T) {
+		page, cleanup := newSearchStatePage(t, "normal")
 		defer cleanup()
 
+		page.MustEval(`() => window.pick(0, 4)`)
+		require.NoError(t, waitFilterApplied(page, 0, 4, 10*time.Second))
+		// 第二组还没点：等第二组的第 1 项必须超时，而不是因为第一组已选中就通过
+		require.Error(t, waitFilterApplied(page, 2, 1, 1*time.Second))
+		page.MustEval(`() => window.pick(2, 1)`)
+		require.NoError(t, waitFilterApplied(page, 2, 1, 10*time.Second))
+	})
+
+	t.Run("一直 loading：到上限报错，上限是硬的", func(t *testing.T) {
+		page, cleanup := newSearchStatePage(t, "stuck")
+		defer cleanup()
+
+		page.MustEval(`() => window.pick(2, 1)`)
 		start := time.Now()
-		require.False(t, waitFeedsChanged(page, readFeedIDs(page), 1*time.Second))
-		require.Less(t, time.Since(start), 5*time.Second, "上限必须是硬的，不能被单次 Eval 拖长")
+		err := waitFilterApplied(page, 2, 1, 1*time.Second)
+		require.Error(t, err)
+		require.Less(t, time.Since(start), 5*time.Second)
+	})
+
+	t.Run("页面选中了别的选项：报错", func(t *testing.T) {
+		page, cleanup := newSearchStatePage(t, "wrong")
+		defer cleanup()
+
+		page.MustEval(`() => window.pick(2, 1)`)
+		require.Error(t, waitFilterApplied(page, 2, 1, 2*time.Second))
+	})
+
+	t.Run("页面里没有筛选状态：报错而不是当作成功", func(t *testing.T) {
+		page, cleanup := newSearchStatePage(t, "normal")
+		defer cleanup()
+
+		page.MustEval(`() => { delete window.__INITIAL_STATE__.search.activeFilters; }`)
+		require.Error(t, waitFilterApplied(page, 2, 1, 1*time.Second))
 	})
 
 	t.Run("调用方取消后立刻返回", func(t *testing.T) {
-		page, cleanup := newFeedsPage(t)
+		page, cleanup := newSearchStatePage(t, "stuck")
 		defer cleanup()
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -266,7 +324,7 @@ func TestWaitFeedsChanged(t *testing.T) {
 		time.AfterFunc(500*time.Millisecond, cancel)
 
 		start := time.Now()
-		require.False(t, waitFeedsChanged(cancelled, readFeedIDs(page), 30*time.Second))
+		require.Error(t, waitFilterApplied(cancelled, 2, 1, 30*time.Second))
 		require.Less(t, time.Since(start), 5*time.Second)
 	})
 }

@@ -11,7 +11,6 @@ import (
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
-	"github.com/sirupsen/logrus"
 	"github.com/xpzouying/xiaohongshu-mcp/configs"
 	"github.com/xpzouying/xiaohongshu-mcp/errors"
 )
@@ -57,8 +56,10 @@ var filterGroups = []filterGroup{
 
 // pendingFilter 一个待应用的筛选项。
 type pendingFilter struct {
-	group  string // 组标签
-	option string // 选项文本
+	group     string // 组标签
+	option    string // 选项文本
+	groupIdx  int    // 组在页面 activeFilters 里的下标（与 filterGroups 顺序一致）
+	optionIdx int    // 选项在该组里的下标（与 allowed 顺序一致）
 }
 
 // collectFilters 把入参整理成待应用的筛选项，同一组以最后一个非空值为准，等于默认值的不点。
@@ -83,12 +84,14 @@ func collectFilters(filters []FilterOption) ([]pendingFilter, error) {
 	}
 
 	var pending []pendingFilter
-	for _, g := range filterGroups {
+	for gi, g := range filterGroups {
 		value, ok := selected[g.label]
 		if !ok || value == g.defaultValue {
 			continue
 		}
-		pending = append(pending, pendingFilter{group: g.label, option: value})
+		pending = append(pending, pendingFilter{
+			group: g.label, option: value, groupIdx: gi, optionIdx: slices.Index(g.allowed, value),
+		})
 	}
 
 	return pending, nil
@@ -124,8 +127,8 @@ func (s *SearchAction) Search(ctx context.Context, keyword string, limit int, fi
 		filterButton := page.MustElement(`div.filter`)
 		filterButton.MustHover()
 
-		// 等筛选面板里的选项真的渲染出来：只等容器出现就去读，会把「还没渲染完」误报成「没有这一组」。
-		page.MustWait(`() => document.querySelectorAll('div.filter-panel div.filters div.tags').length > 0`)
+		// 等待筛选面板出现
+		page.MustWait(`() => document.querySelector('div.filter-panel') !== null`)
 
 		for _, pf := range pending {
 			option, err := findFilterOption(page, pf)
@@ -133,13 +136,14 @@ func (s *SearchAction) Search(ctx context.Context, keyword string, limit int, fi
 				return nil, err
 			}
 
-			// 每点一项都等结果换批再点下一项：站点点完先清空再灌入，
-			// 连点会让下一次点击落在重排中的面板上，也分不清结果带没带上后面的筛选。
-			before := readFeedIDs(page)
+			// 每点一项都等页面确认这一项已生效、结果加载完成，再点下一项：
+			// 站点点完先清空 feeds 再灌入新数据，连点会让下一次点击落在重排中的面板上。
 			if err := option.Click(proto.InputMouseButtonLeft, 1); err != nil {
 				return nil, fmt.Errorf("点击筛选选项「%s」失败: %w", pf.option, err)
 			}
-			waitFeedsChanged(page, before, filterResultTimeout)
+			if err := waitFilterApplied(page, pf.groupIdx, pf.optionIdx, filterResultTimeout); err != nil {
+				return nil, fmt.Errorf("筛选「%s」未生效: %w", pf.option, err)
+			}
 		}
 	}
 
@@ -200,43 +204,36 @@ func optionVisible(opt *rod.Element) (bool, error) {
 	return res.Value.Num() >= minOptionOpacity, nil
 }
 
-// feedIDsJS 读当前结果集的 id 列表，用来判断数据有没有换一批。
-const feedIDsJS = `() => {
-	const f = window.__INITIAL_STATE__?.search?.feeds;
-	const v = f ? (f.value !== undefined ? f.value : f._value) : null;
-	return v ? v.map(x => x.id).join(",") : "";
+// filterAppliedJS 读页面自己记录的筛选状态（__INITIAL_STATE__.search）：
+// activeFilters[组] 是该组当前选中的选项下标，state 是 "loading" / "success"。
+// 实测点击的那一刻 activeFilters 更新、state 变 loading 且 feeds 清空，
+// 请求完成后 state 回到 success 并填入新结果。
+const filterAppliedJS = `(group, option) => {
+	const s = window.__INITIAL_STATE__?.search;
+	if (!s) return false;
+	const u = v => (v && typeof v === "object" && ("_value" in v || "value" in v)) ? (v.value !== undefined ? v.value : v._value) : v;
+	const active = u(s.activeFilters);
+	return Array.isArray(active) && active[group] === option && u(s.state) === "success";
 }`
 
-func readFeedIDs(page *rod.Page) string {
-	res, err := page.Eval(feedIDsJS)
-	if err != nil {
-		return ""
-	}
-	return res.Value.Str()
-}
-
-// waitFeedsChanged 等筛选后的数据到位。
+// waitFilterApplied 等页面确认「这一组选中了这一项，且这次请求已完成」。
 //
-// 点完筛选项之后不能立刻读结果：站点是先把 feeds 清空、再灌入新数据，
-// 中间读到的要么是空，要么还是筛选前那一批。原先等 __INITIAL_STATE__ !== undefined，
-// 这个条件从首屏起就为真，等于没等。
+// 点完筛选项之后不能立刻读结果：feeds 先被清空再灌入，读早了拿到空或筛选前那一批。
+// 这里不靠「结果 id 变没变」去猜：条件含具体的组和选项下标，所以上一项的结果晚到、
+// 或结果集恰好没变，都不会误判；超时就是页面真的没进入「已选中且加载完成」，如实报错。
 //
-// 等待用 page.Timeout 派生出带上限的 page：上限同时约束单次 Eval，
-// 且仍是调用方 ctx 的子 ctx，调用方取消时立刻返回。返回 false 表示没等到变化（超时或被取消）。
-//
-// 超时不报错：「点完筛选结果集恰好没变」是合法结果（例如该筛选没改变前几条），
-// 此时报错会把一次有效的搜索变成失败；点击本身已成功，所以只告警并返回当前数据。
-func waitFeedsChanged(page *rod.Page, before string, timeout time.Duration) bool {
+// 等待用 page.Timeout 派生出带上限的 page：上限同时约束单次 Eval，且仍是调用方 ctx 的子 ctx，
+// 调用方取消时立刻返回。页面里读不到这些状态字段时同样超时报错，不会当成成功。
+func waitFilterApplied(page *rod.Page, group, option int, timeout time.Duration) error {
 	wp := page.Timeout(timeout)
 	for {
-		if now := readFeedIDs(wp); now != "" && now != before {
-			return true
+		if res, err := wp.Eval(filterAppliedJS, group, option); err == nil && res.Value.Bool() {
+			return nil
 		}
 		select {
 		case <-wp.GetContext().Done():
-			logrus.Warnf("筛选后等待结果刷新结束（%s 内没有变化或已取消），返回的可能是筛选前的数据", timeout)
-			return false
-		case <-time.After(300 * time.Millisecond):
+			return fmt.Errorf("%s 内页面没有进入「该项已选中且结果加载完成」的状态: %w", timeout, wp.GetContext().Err())
+		case <-time.After(150 * time.Millisecond):
 		}
 	}
 }
@@ -258,9 +255,12 @@ func findFilterOption(page *rod.Page, pf pendingFilter) (*rod.Element, error) {
 
 	for _, group := range groups {
 		// 组标签是 div.filters 下的直接子 span
-		label, err := group.Element(":scope > span")
+		hasLabel, label, err := group.Has(":scope > span")
 		if err != nil {
 			return nil, fmt.Errorf("读取筛选组标签失败: %w", err)
+		}
+		if !hasLabel {
+			continue
 		}
 		text, err := label.Text()
 		if err != nil {
