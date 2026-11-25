@@ -124,8 +124,8 @@ func (s *SearchAction) Search(ctx context.Context, keyword string, limit int, fi
 		filterButton := page.MustElement(`div.filter`)
 		filterButton.MustHover()
 
-		// 等待筛选面板出现
-		page.MustWait(`() => document.querySelector('div.filter-panel') !== null`)
+		// 等筛选面板里的选项真的渲染出来：只等容器出现就去读，会把「还没渲染完」误报成「没有这一组」。
+		page.MustWait(`() => document.querySelectorAll('div.filter-panel div.filters div.tags').length > 0`)
 
 		for _, pf := range pending {
 			option, err := findFilterOption(page, pf)
@@ -182,13 +182,22 @@ const effectiveOpacityJS = `() => {
 	return o;
 }`
 
-// optionVisible 判断筛选选项节点是不是真实可见的那一个。取不到样式时按可见处理。
-func optionVisible(opt *rod.Element) bool {
+// optionVisible 判断筛选选项节点是不是真实可见的那一个：
+// rod 的 Visible 排除 display:none / visibility:hidden / 零尺寸，再加上有效不透明度。
+// 读不到状态就返回错误，由调用方上报，不能默认当作可见（那样会失去排除诱饵的依据）。
+func optionVisible(opt *rod.Element) (bool, error) {
+	visible, err := opt.Visible()
+	if err != nil {
+		return false, err
+	}
+	if !visible {
+		return false, nil
+	}
 	res, err := opt.Eval(effectiveOpacityJS)
 	if err != nil {
-		return true
+		return false, err
 	}
-	return res.Value.Num() >= minOptionOpacity
+	return res.Value.Num() >= minOptionOpacity, nil
 }
 
 // feedIDsJS 读当前结果集的 id 列表，用来判断数据有没有换一批。
@@ -212,16 +221,24 @@ func readFeedIDs(page *rod.Page) string {
 // 中间读到的要么是空，要么还是筛选前那一批。原先等 __INITIAL_STATE__ !== undefined，
 // 这个条件从首屏起就为真，等于没等。
 //
-// 超时不报错：筛选已经点上了，宁可返回可能偏旧的数据，也不要整个搜索失败。
-func waitFeedsChanged(page *rod.Page, before string, timeout time.Duration) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if now := readFeedIDs(page); now != "" && now != before {
-			return
+// 等待用 page.Timeout 派生出带上限的 page：上限同时约束单次 Eval，
+// 且仍是调用方 ctx 的子 ctx，调用方取消时立刻返回。返回 false 表示没等到变化（超时或被取消）。
+//
+// 超时不报错：「点完筛选结果集恰好没变」是合法结果（例如该筛选没改变前几条），
+// 此时报错会把一次有效的搜索变成失败；点击本身已成功，所以只告警并返回当前数据。
+func waitFeedsChanged(page *rod.Page, before string, timeout time.Duration) bool {
+	wp := page.Timeout(timeout)
+	for {
+		if now := readFeedIDs(wp); now != "" && now != before {
+			return true
 		}
-		time.Sleep(300 * time.Millisecond)
+		select {
+		case <-wp.GetContext().Done():
+			logrus.Warnf("筛选后等待结果刷新结束（%s 内没有变化或已取消），返回的可能是筛选前的数据", timeout)
+			return false
+		case <-time.After(300 * time.Millisecond):
+		}
 	}
-	logrus.Warnf("筛选后等待结果刷新超时（%s），返回的可能是筛选前的数据", timeout)
 }
 
 // findFilterOption 在筛选面板里定位一个选项：按标签找到组，再在组内按文本找选项。
@@ -243,10 +260,13 @@ func findFilterOption(page *rod.Page, pf pendingFilter) (*rod.Element, error) {
 		// 组标签是 div.filters 下的直接子 span
 		label, err := group.Element(":scope > span")
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("读取筛选组标签失败: %w", err)
 		}
 		text, err := label.Text()
-		if err != nil || strings.TrimSpace(text) != pf.group {
+		if err != nil {
+			return nil, fmt.Errorf("读取筛选组标签失败: %w", err)
+		}
+		if strings.TrimSpace(text) != pf.group {
 			continue
 		}
 
@@ -260,7 +280,7 @@ func findFilterOption(page *rod.Page, pf pendingFilter) (*rod.Element, error) {
 		for _, opt := range options {
 			t, err := opt.Text()
 			if err != nil {
-				continue
+				return nil, fmt.Errorf("读取「%s」的选项文本失败: %w", pf.group, err)
 			}
 			t = strings.TrimSpace(t)
 			if !slices.Contains(available, t) {
@@ -271,7 +291,11 @@ func findFilterOption(page *rod.Page, pf pendingFilter) (*rod.Element, error) {
 			}
 
 			matched = true
-			if optionVisible(opt) {
+			visible, err := optionVisible(opt)
+			if err != nil {
+				return nil, fmt.Errorf("读取「%s」的选项「%s」状态失败: %w", pf.group, pf.option, err)
+			}
+			if visible {
 				return opt, nil
 			}
 		}

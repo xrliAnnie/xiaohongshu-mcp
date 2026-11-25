@@ -1,6 +1,7 @@
 package xiaohongshu
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
 	"github.com/stretchr/testify/require"
 	"github.com/xpzouying/xiaohongshu-mcp/browser"
@@ -168,6 +170,24 @@ func TestFindFilterOptionSkipsHoneypot(t *testing.T) {
 		require.ErrorContains(t, err, "最多收藏", "应列出页面上实际有的选项")
 	})
 
+	t.Run("display:none 的节点即使不透明度为 1 也不可见", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			hidden := `<div class="filters"><span>排序依据</span><div class="tag-container">` +
+				`<div class="tags" style="display:none"><span>最新</span></div></div></div>`
+			fmt.Fprintf(w, fakeFilterPanel, hidden)
+		}))
+		defer srv.Close()
+		b := browser.NewBrowser(true)
+		defer b.Close()
+		page := b.NewPage()
+		defer page.Close()
+		page.MustNavigate(srv.URL).MustWaitLoad()
+
+		_, err := findFilterOption(page, pendingFilter{group: "排序依据", option: "最新"})
+		require.ErrorContains(t, err, "不可见")
+	})
+
 	t.Run("只剩诱饵节点时报不可见，不点它", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -187,34 +207,66 @@ func TestFindFilterOptionSkipsHoneypot(t *testing.T) {
 	})
 }
 
-func TestWaitFeedsChanged(t *testing.T) {
-	if os.Getenv("XHS_BROWSER_TESTS") == "" {
-		t.Skip("set XHS_BROWSER_TESTS=1 to run local-fixture browser tests (headless Chrome)")
-	}
-	t.Setenv("COOKIES_PATH", filepath.Join(t.TempDir(), "cookies.json"))
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		// 先清空再灌入新数据，模拟站点点筛选后的行为
-		fmt.Fprint(w, `<!doctype html><html><body><script>
+const fakeFeedsPage = `<!doctype html><html><body><script>
 window.__INITIAL_STATE__ = {search: {feeds: {value: [{id: "a"}, {id: "b"}]}}};
 window.change = () => {
   window.__INITIAL_STATE__.search.feeds.value = [];
   setTimeout(() => { window.__INITIAL_STATE__.search.feeds.value = [{id: "c"}, {id: "d"}]; }, 600);
 };
-</script></body></html>`)
+</script></body></html>`
+
+func newFeedsPage(t *testing.T) (*rod.Page, func()) {
+	t.Helper()
+	t.Setenv("COOKIES_PATH", filepath.Join(t.TempDir(), "cookies.json"))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, fakeFeedsPage)
 	}))
-	defer srv.Close()
-
 	b := browser.NewBrowser(true)
-	defer b.Close()
 	page := b.NewPage()
-	defer page.Close()
 	page.MustNavigate(srv.URL).MustWaitLoad()
+	return page, func() {
+		_ = page.Close()
+		b.Close()
+		srv.Close()
+	}
+}
 
-	before := readFeedIDs(page)
-	require.Equal(t, "a,b", before)
-	page.MustEval(`() => window.change()`)
-	waitFeedsChanged(page, before, 10*time.Second)
-	require.Equal(t, "c,d", readFeedIDs(page), "必须等到新数据灌入，而不是读到清空的中间态")
+func TestWaitFeedsChanged(t *testing.T) {
+	if os.Getenv("XHS_BROWSER_TESTS") == "" {
+		t.Skip("set XHS_BROWSER_TESTS=1 to run local-fixture browser tests (headless Chrome)")
+	}
+
+	t.Run("等到新数据灌入，而不是读到清空的中间态", func(t *testing.T) {
+		page, cleanup := newFeedsPage(t)
+		defer cleanup()
+
+		before := readFeedIDs(page)
+		require.Equal(t, "a,b", before)
+		page.MustEval(`() => window.change()`)
+		require.True(t, waitFeedsChanged(page, before, 10*time.Second))
+		require.Equal(t, "c,d", readFeedIDs(page))
+	})
+
+	t.Run("结果一直不变：到上限就返回 false", func(t *testing.T) {
+		page, cleanup := newFeedsPage(t)
+		defer cleanup()
+
+		start := time.Now()
+		require.False(t, waitFeedsChanged(page, readFeedIDs(page), 1*time.Second))
+		require.Less(t, time.Since(start), 5*time.Second, "上限必须是硬的，不能被单次 Eval 拖长")
+	})
+
+	t.Run("调用方取消后立刻返回", func(t *testing.T) {
+		page, cleanup := newFeedsPage(t)
+		defer cleanup()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancelled := page.Context(ctx)
+		time.AfterFunc(500*time.Millisecond, cancel)
+
+		start := time.Now()
+		require.False(t, waitFeedsChanged(cancelled, readFeedIDs(page), 30*time.Second))
+		require.Less(t, time.Since(start), 5*time.Second)
+	})
 }
