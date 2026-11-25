@@ -127,20 +127,20 @@ func (s *SearchAction) Search(ctx context.Context, keyword string, limit int, fi
 		// 等待筛选面板出现
 		page.MustWait(`() => document.querySelector('div.filter-panel') !== null`)
 
-		// 记下筛选前的结果，用来判断筛选后的数据什么时候到位
-		before := readFeedIDs(page)
-
 		for _, pf := range pending {
 			option, err := findFilterOption(page, pf)
 			if err != nil {
 				return nil, err
 			}
+
+			// 每点一项都等结果换批再点下一项：站点点完先清空再灌入，
+			// 连点会让下一次点击落在重排中的面板上，也分不清结果带没带上后面的筛选。
+			before := readFeedIDs(page)
 			if err := option.Click(proto.InputMouseButtonLeft, 1); err != nil {
 				return nil, fmt.Errorf("点击筛选选项「%s」失败: %w", pf.option, err)
 			}
+			waitFeedsChanged(page, before, filterResultTimeout)
 		}
-
-		waitFeedsChanged(page, before, filterResultTimeout)
 	}
 
 	result := page.MustEval(readFeedsJS).String()
